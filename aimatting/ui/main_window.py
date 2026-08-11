@@ -68,11 +68,11 @@ from aimatting.core.image_ops import (
     combine_with_target_mask,
     composite_background,
     defringe,
+    flatten_over_background,
     flatten_to_rgb,
     keep_masked_region,
     load_image,
     mask_bbox,
-    opaque_over_white,
     paint_mask,
     soften_alpha,
 )
@@ -245,8 +245,18 @@ class MainWindow(FluentWindow):
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
-        splitter.setHandleWidth(1)
-        splitter.setSizes([300, 700, 340])
+        splitter.setHandleWidth(7)
+        splitter.setCollapsible(0, False)
+        splitter.setCollapsible(1, False)
+        splitter.setCollapsible(2, False)
+        splitter.setOpaqueResize(True)
+        splitter.setStyleSheet(
+            "QSplitter::handle { background: rgba(255,255,255,0.08); }"
+            "QSplitter::handle:hover { background: rgba(76,141,255,0.45); }"
+        )
+        splitter.setSizes([280, 700, 300])
+        self.single_left.setMinimumWidth(250)
+        self.panel.setMinimumWidth(270)
         root.addWidget(splitter, 1)
 
         root.addWidget(self._make_status_bar(True))
@@ -1599,8 +1609,11 @@ class MainWindow(FluentWindow):
                 else:
                     image = alpha_to_cutout(source, alpha_img)
             else:
-                image = opaque_over_white(
-                    source, alpha_img, opacity / 100.0 if enabled else 1.0
+                image = flatten_over_background(
+                    source,
+                    alpha_img,
+                    color if enabled else (255, 255, 255),
+                    opacity / 100.0 if enabled else 1.0,
                 )
             save_image(image, out_path, fmt, quality)
         except Exception as exc:  # noqa: BLE001

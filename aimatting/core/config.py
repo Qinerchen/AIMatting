@@ -8,7 +8,7 @@ from typing import Any
 
 
 APP_NAME = "AIMatting"
-APP_VERSION = "0.0.5"
+APP_VERSION = "0.0.6"
 
 
 def app_root() -> Path:

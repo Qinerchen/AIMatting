@@ -134,9 +134,33 @@ def keep_masked_region(image: Image.Image, mask) -> Image.Image:
 
 def opaque_over_white(image: Image.Image, alpha, opacity: float = 1.0) -> Image.Image:
     """JPG/WEBP 无透明通道场景：将半透明结果平铺到白色底。"""
-    if float(opacity) >= 0.999:
-        return composite_background(image, alpha, (255, 255, 255), 1.0).convert("RGB")
-    return composite_background(image, alpha, (255, 255, 255), opacity).convert("RGB")
+    return flatten_over_background(image, alpha, (255, 255, 255), opacity)
+
+
+def flatten_over_background(
+    image: Image.Image,
+    alpha,
+    background=(255, 255, 255),
+    opacity: float = 1.0,
+) -> Image.Image:
+    """将抠图结果平铺到纯色背景上，输出不透明 RGB（供 JPG/WEBP 等格式导出）。
+
+    背景按 opacity 与白色画布混合：bg_layer = background*opacity + white*(1-opacity)。
+    前景按 alpha 正常合成，避免直接丢弃 alpha 导致的颜色错误（旧实现固定白底，
+    且半透明背景直接去 alpha 会偏色）。
+    """
+    fg = np.asarray(flatten_to_rgb(image), dtype=np.float32)
+    if isinstance(alpha, Image.Image):
+        a = np.asarray(alpha.convert("L"), dtype=np.float32) / 255.0
+    else:
+        a = np.asarray(alpha, dtype=np.float32) / 255.0
+    if a.ndim == 2:
+        a = a[..., None]
+    bg = np.asarray(background, dtype=np.float32).reshape(-1)[:3]
+    o = float(np.clip(opacity, 0.0, 1.0))
+    bg_layer = (bg * o + 255.0 * (1.0 - o)).reshape(1, 1, 3)
+    out = fg * a + bg_layer * (1.0 - a)
+    return Image.fromarray(np.clip(out, 0, 255).astype(np.uint8), mode="RGB")
 
 
 def soften_alpha(alpha, radius: float = 1.0) -> Image.Image:

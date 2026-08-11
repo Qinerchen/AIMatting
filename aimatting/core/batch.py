@@ -12,6 +12,7 @@ from aimatting.core.image_ops import (
     adjust_image,
     alpha_to_cutout,
     composite_background,
+    flatten_over_background,
     flatten_to_rgb,
     load_image,
     opaque_over_white,
@@ -75,10 +76,13 @@ class BatchTask(QThread):
                     alpha, _ = self._engine.matte(
                         rgb, max_side=fo["max_side"], progress=lambda _: None
                     )
-                    if fo["bg_enabled"] and fo["fmt"] in ("jpg", "webp"):
-                        result = opaque_over_white(
-                            rgb, alpha, fo["bg_opacity"]
-                        )
+                    if fo["fmt"] in ("jpg", "webp"):
+                        if fo["bg_enabled"]:
+                            result = flatten_over_background(
+                                rgb, alpha, fo["bg_color"], fo["bg_opacity"]
+                            )
+                        else:
+                            result = opaque_over_white(rgb, alpha, 1.0)
                     elif fo["bg_enabled"]:
                         result = composite_background(
                             rgb, alpha, fo["bg_color"], fo["bg_opacity"]

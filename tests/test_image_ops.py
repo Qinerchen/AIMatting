@@ -7,6 +7,7 @@ from aimatting.core.image_ops import (
     adjust_image,
     alpha_to_cutout,
     composite_background,
+    flatten_over_background,
     flatten_to_rgb,
     paint_mask,
     soften_alpha,
@@ -59,6 +60,29 @@ def test_alpha_to_cutout() -> None:
     out = alpha_to_cutout(img, alpha)
     assert out.mode == "RGBA"
     assert out.getpixel((0, 0))[3] == 128
+
+
+def test_flatten_over_background_uses_color() -> None:
+    img = _rgb((4, 4), (200, 100, 50))
+    alpha = _alpha_array(0)
+    out = flatten_over_background(img, alpha, (0, 0, 255), 1.0)
+    assert out.mode == "RGB"
+    assert out.getpixel((0, 0)) == (0, 0, 255)
+
+
+def test_flatten_over_background_keeps_foreground() -> None:
+    img = _rgb((4, 4), (200, 100, 50))
+    alpha = _alpha_array(255)
+    out = flatten_over_background(img, alpha, (0, 0, 255), 1.0)
+    assert out.getpixel((0, 0)) == (200, 100, 50)
+
+
+def test_flatten_over_background_half_opacity_blends_white() -> None:
+    img = _rgb((4, 4), (200, 100, 50))
+    alpha = _alpha_array(0)
+    out = flatten_over_background(img, alpha, (0, 0, 255), 0.5)
+    # 背景层 = 蓝*0.5 + 白*0.5
+    assert out.getpixel((0, 0)) == (127, 127, 255)
 
 
 def test_adjust_image_bounds() -> None:
