@@ -216,6 +216,7 @@ class ToolPanel(QWidget):
     preprocess_changed = Signal()
     preprocess_commit = Signal()
     bg_changed = Signal()
+    bg_commit = Signal()
 
     def __init__(self, settings, parent=None) -> None:
         super().__init__(parent)
@@ -455,6 +456,7 @@ class ToolPanel(QWidget):
                 "PushButton:hover { border: 2px solid rgba(255,255,255,0.9); }"
             )
             btn.clicked.connect(lambda _=False, h=hex_color: self._set_color(h))
+            btn.clicked.connect(self.bg_commit.emit)
             self._color_widgets.append(btn)
             color_grid.addWidget(btn, idx // 5, idx % 5)
         layout.addLayout(color_grid)
@@ -547,11 +549,13 @@ class ToolPanel(QWidget):
     def _connect_signals(self) -> None:
         self.bg_enabled.toggled.connect(lambda _: self.bg_changed.emit())
         self.opacity_slider.valueChanged.connect(lambda _: self.bg_changed.emit())
+        self.opacity_slider.sliderReleased.connect(self.bg_commit.emit)
         self.color_preview.clicked.connect(self.pick_custom_color)
         self.pipette_button.clicked.connect(self.pick_screen_color)
         self.hex_edit.editingFinished.connect(self._apply_hex)
         for spin in self.rgb_spins.values():
             spin.valueChanged.connect(self._rgb_to_hex)
+            spin.editingFinished.connect(self.bg_commit.emit)
         for slider in self.prep_sliders.values():
             slider.valueChanged.connect(lambda _: self.preprocess_changed.emit())
             slider.sliderReleased.connect(self.preprocess_commit.emit)
@@ -650,6 +654,7 @@ class ToolPanel(QWidget):
             self._set_color(text)
         else:
             self.hex_edit.setText(self._current_hex)
+        self.bg_commit.emit()
 
     def _rgb_to_hex(self, _=0) -> None:
         color = QColor(
@@ -672,6 +677,7 @@ class ToolPanel(QWidget):
         run_color_dialog(
             self, QColor(self._current_hex), "选择自定义背景色", self._set_color
         )
+        self.bg_commit.emit()
 
     def pick_screen_color(self) -> None:
         from aimatting.ui.eyedropper import Eyedropper
@@ -679,6 +685,7 @@ class ToolPanel(QWidget):
         picker = Eyedropper(self)
         if picker.exec() == QDialog.DialogCode.Accepted:
             self._set_color(picker.color())
+            self.bg_commit.emit()
 
     def get_bg_state(self) -> tuple[bool, str, int]:
         return (

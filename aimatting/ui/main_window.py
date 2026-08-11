@@ -161,7 +161,21 @@ class MainWindow(FluentWindow):
         self._preprocess_timer = QTimer(self)
         self._preprocess_timer.setSingleShot(True)
         self._preprocess_timer.setInterval(150)
-        self._preprocess_timer.timeout.connect(self._apply_preprocess_now)
+        self._preprocess_timer.timeout.connect(
+            lambda: self._apply_preprocess_now(push_history=False)
+        )
+
+        self._bg_preview_timer = QTimer(self)
+        self._bg_preview_timer.setSingleShot(True)
+        self._bg_preview_timer.setInterval(50)
+        self._bg_preview_timer.timeout.connect(
+            lambda: self._render(fit=False, preview=True)
+        )
+
+        self._bg_final_timer = QTimer(self)
+        self._bg_final_timer.setSingleShot(True)
+        self._bg_final_timer.setInterval(80)
+        self._bg_final_timer.timeout.connect(lambda: self._render(fit=False))
 
         self._overlay_timer = QTimer(self)
         self._overlay_timer.setSingleShot(True)
@@ -466,9 +480,12 @@ class MainWindow(FluentWindow):
         self.cancel_button.clicked.connect(self._cancel_current_task)
 
         self.tool_panel.tool_selected.connect(self._on_tool_selected)
-        self.tool_panel.bg_changed.connect(lambda: self._render(fit=False))
+        self.tool_panel.bg_changed.connect(self._schedule_bg_preview)
+        self.tool_panel.bg_commit.connect(self._schedule_bg_final)
         self.tool_panel.preprocess_changed.connect(self._preprocess_timer.start)
-        self.tool_panel.preprocess_commit.connect(self._apply_preprocess_now)
+        self.tool_panel.preprocess_commit.connect(
+            lambda: self._apply_preprocess_now(push_history=True)
+        )
         self.tool_panel.mask_mode_changed.connect(self._on_brush_mode_changed)
         self.tool_panel.mask_clear_requested.connect(self._clear_mask_state)
         self.tool_panel.brush_params_changed.connect(self._sync_brush_cursor)
@@ -564,19 +581,24 @@ class MainWindow(FluentWindow):
     # ------------------------------------------------------------------
     # 预处理
     # ------------------------------------------------------------------
-    def _apply_preprocess_now(self) -> None:
+    def _apply_preprocess_now(self, push_history: bool = True) -> None:
         if self.original_image is None:
             return
         self._preprocess_timer.stop()
+        prep = self.tool_panel.get_preprocess()
+        if not push_history:
+            # 拖动中的实时预览：只更新低分辨率预览，不修改工作图、不入历史
+            self._render_preprocess_preview()
+            return
         if self.alpha is not None:
             # 保留历史：把当前状态入栈，预处理变化可撤销
             self.history.push(
                 self.working_rgb,
                 Image.fromarray(self.alpha),
-                self.tool_panel.get_preprocess(),
+                prep,
             )
         base = self.prep_source or self.original_image
-        self.working_rgb = adjust_image(base, **self.tool_panel.get_preprocess())
+        self.working_rgb = adjust_image(base, **prep)
         self.fg_rgb = None
         self._paint_changed = False
         self._clear_mask_state()
@@ -754,7 +776,7 @@ class MainWindow(FluentWindow):
     # ------------------------------------------------------------------
     # 预览渲染
     # ------------------------------------------------------------------
-    def _render(self, fit: bool = True) -> None:
+    def _render(self, fit: bool = True, preview: bool = False) -> None:
         if self.working_rgb is None:
             return
         source = self._display_source()
@@ -765,13 +787,85 @@ class MainWindow(FluentWindow):
         enabled, hex_color, opacity = self.tool_panel.get_bg_state()
         if enabled and self._active_tool == "bg":
             color = QColor(hex_color).getRgb()[:3]
-            display = composite_background(
-                source, alpha_img, color, opacity / 100.0
+            display = self._composite_display(
+                source, alpha_img, color, opacity / 100.0, preview
             )
         else:
             display = alpha_to_cutout(source, alpha_img)
         self.view.set_pil_image(display, fit=fit)
-        self._refresh_compare(source, display)
+        if not preview:
+            self._refresh_compare(source, display)
+
+    def _schedule_bg_preview(self) -> None:
+        """背景颜色/不透明度拖动中：防抖 + 低分辨率预览。"""
+        self._bg_final_timer.stop()
+        self._bg_preview_timer.start()
+
+    def _schedule_bg_final(self) -> None:
+        """背景颜色/不透明度松手后：停止预览，稍后全分辨率精算。"""
+        self._bg_preview_timer.stop()
+        self._bg_final_timer.start()
+
+    def _composite_display(
+        self,
+        source: Image.Image,
+        alpha_img: Image.Image,
+        color: tuple[int, int, int],
+        opacity: float,
+        preview: bool,
+    ) -> Image.Image:
+        """背景合成：预览模式降到 1280px 内计算，再放大回原尺寸，避免卡顿。"""
+        w, h = source.size
+        if not preview or max(w, h) <= 1280:
+            return composite_background(source, alpha_img, color, opacity)
+        scale = 1280.0 / max(w, h)
+        target = (max(1, int(w * scale)), max(1, int(h * scale)))
+        small = composite_background(
+            source.resize(target, Image.Resampling.BILINEAR),
+            alpha_img.resize(target, Image.Resampling.BILINEAR),
+            color,
+            opacity,
+        )
+        return small.resize((w, h), Image.Resampling.BILINEAR)
+
+    def _render_preprocess_preview(self) -> None:
+        """预处理拖动中的实时预览：小图调整 + 小图合成，松手后再全量精算。"""
+        base = self.prep_source or self.original_image
+        if base is None:
+            return
+        prep = self.tool_panel.get_preprocess()
+        w, h = base.size
+        scale = min(1.0, 1280.0 / max(w, h))
+        if scale < 1.0:
+            target = (max(1, int(w * scale)), max(1, int(h * scale)))
+            adjusted = adjust_image(
+                base.resize(target, Image.Resampling.BILINEAR), **prep
+            )
+        else:
+            adjusted = adjust_image(base, **prep)
+
+        if self.alpha is None:
+            if scale < 1.0:
+                adjusted = adjusted.resize((w, h), Image.Resampling.BILINEAR)
+            self.view.set_pil_image(adjusted, fit=False)
+            return
+
+        alpha_img = Image.fromarray(self.alpha)
+        if scale < 1.0:
+            alpha_small = alpha_img.resize(target, Image.Resampling.BILINEAR)
+        else:
+            alpha_small = alpha_img
+        enabled, hex_color, opacity = self.tool_panel.get_bg_state()
+        if enabled and self._active_tool == "bg":
+            color = QColor(hex_color).getRgb()[:3]
+            display = composite_background(
+                adjusted, alpha_small, color, opacity / 100.0
+            )
+        else:
+            display = alpha_to_cutout(adjusted, alpha_small)
+        if scale < 1.0:
+            display = display.resize((w, h), Image.Resampling.BILINEAR)
+        self.view.set_pil_image(display, fit=False)
 
     def _display_source(self) -> Image.Image:
         """当前用于显示/导出的前景图（去色边后优先）。"""

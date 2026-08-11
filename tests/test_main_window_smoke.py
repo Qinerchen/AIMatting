@@ -283,6 +283,25 @@ def test_crop_can_be_undone_before_matte() -> None:
         win.close()
 
 
+def test_preview_render_paths_do_not_crash() -> None:
+    from aimatting.ui.main_window import MainWindow
+
+    win = MainWindow()
+    try:
+        img = Image.new("RGB", (64, 48), (120, 60, 30))
+        win.current_path = "t.png"
+        win.original_image = img
+        win.prep_source = img
+        win._exit_all_tools()
+        win._reset_working()
+        win.alpha = np.full((48, 64), 255, dtype=np.uint8)
+        win._active_tool = "bg"
+        win._render(fit=False, preview=True)
+        win._render_preprocess_preview()
+    finally:
+        win.close()
+
+
 def test_entering_tool_disables_compare() -> None:
     from aimatting.ui.main_window import MainWindow
 
