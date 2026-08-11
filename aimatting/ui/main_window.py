@@ -65,9 +65,11 @@ from aimatting.core.history import (
 from aimatting.core.image_ops import (
     adjust_image,
     alpha_to_cutout,
+    build_clean_alpha,
     combine_with_target_mask,
     composite_background,
     defringe,
+    despill_edges,
     flatten_over_background,
     flatten_to_rgb,
     keep_masked_region,
@@ -427,7 +429,6 @@ class MainWindow(FluentWindow):
             btn.clicked.connect(slot)
             layout.addWidget(btn)
             self._tb_buttons[key] = btn
-
         return bar
 
     def _on_model_combo_changed(self, model_id: str) -> None:
@@ -774,6 +775,15 @@ class MainWindow(FluentWindow):
                 self.alpha = np.asarray(combined, dtype=np.uint8).copy()
         else:
             self.alpha = alpha_arr.copy()
+        # 移植 AI_Matting_V2：清晰边缘 Alpha（主体内部全不透明、背景干净）
+        self.alpha = build_clean_alpha(
+            self.alpha, feather=1, edge_shrink=1, contrast=1.7
+        )
+        # 移植 AI_Matting_V2：透明边去背景色溢色（despill），边缘不发灰
+        rgba = despill_edges(
+            alpha_to_cutout(self.working_rgb, Image.fromarray(self.alpha))
+        )
+        self.fg_rgb = rgba.convert("RGB")
         self.history.push(
             self.working_rgb,
             Image.fromarray(self.alpha),
@@ -1565,6 +1575,11 @@ class MainWindow(FluentWindow):
             if alpha_img is not None
             else None
         )
+        if self.alpha is not None:
+            rgba = despill_edges(
+                alpha_to_cutout(self.working_rgb, Image.fromarray(self.alpha))
+            )
+            self.fg_rgb = rgba.convert("RGB")
         if snap.preprocess is not None:
             self.tool_panel.set_preprocess(snap.preprocess)
             self._applied_preprocess = dict(snap.preprocess)
@@ -1780,7 +1795,7 @@ class MainWindow(FluentWindow):
         if model_id == "birefnet_hr_matting":
             self.status(
                 "当前为 CPU 推理且使用 HR 大模型，速度较慢；"
-                "建议切换「BiRefNet lite 2K」或在输出设置中启用 TensorRT"
+                "建议在输出设置中启用 TensorRT 加速"
             )
 
     def _on_model_preload_failed(self, message: str) -> None:

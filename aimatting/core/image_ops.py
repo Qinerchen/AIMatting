@@ -172,6 +172,117 @@ def soften_alpha(alpha, radius: float = 1.0) -> Image.Image:
     return img.filter(ImageFilter.GaussianBlur(radius))
 
 
+def _mask_morph(mask, pixels: int, mode: str) -> np.ndarray:
+    """二值掩膜形态学操作：'erode' 向内收缩 / 'dilate' 向外扩张。
+
+    移植自 AI_Matting_V2 的 mask_process（原实现用 cv2 椭圆核，
+    这里用 PIL 的 Min/MaxFilter 等价实现，避免引入 opencv 依赖）。
+    """
+    pixels = max(0, int(pixels))
+    if pixels == 0:
+        return np.asarray(mask, dtype=np.uint8)
+    size = pixels * 2 + 1
+    img = Image.fromarray(np.asarray(mask, dtype=np.uint8), mode="L")
+    filt = (
+        ImageFilter.MinFilter(size)
+        if mode == "erode"
+        else ImageFilter.MaxFilter(size)
+    )
+    return np.asarray(img.filter(filt), dtype=np.uint8)
+
+
+def build_clean_alpha(
+    mask,
+    feather: int = 1,
+    edge_shrink: int = 1,
+    contrast: float = 1.7,
+) -> np.ndarray:
+    """把 BiRefNet 软 Mask 处理成干净、边缘清晰的 Alpha（移植自 AI_Matting_V2）。
+
+    与 V2 完全一致的策略：
+    - 主体内部（向内收缩后）强制 alpha=255，保证合成后颜色不稀释、识别更完整；
+    - 背景（向外扩张后）强制 alpha=0；
+    - 仅边界保留少量软值，并用对比度增强收窄半透明过渡带（约 2-4px）；
+    - 开闭运算去毛刺/填洞，可选窄羽化（feather）与去毛边（edge_shrink）。
+    """
+    soft = np.asarray(mask, dtype=np.float32)
+    binary = (soft > 128).astype(np.uint8) * 255
+    # 开运算（先腐蚀后膨胀）去孤立毛刺
+    binary = _mask_morph(_mask_morph(binary, 2, "erode"), 2, "dilate")
+    # 闭运算（先膨胀后腐蚀）填内部小洞
+    binary = _mask_morph(_mask_morph(binary, 2, "dilate"), 2, "erode")
+    if edge_shrink and edge_shrink > 0:
+        binary = _mask_morph(binary, int(edge_shrink), "erode")
+    alpha = np.clip((soft - 128.0) * float(contrast) + 128.0, 0.0, 255.0)
+    if feather and feather > 0:
+        img = Image.fromarray(alpha.astype(np.uint8), mode="L").filter(
+            ImageFilter.GaussianBlur(int(feather))
+        )
+        alpha = np.asarray(img, dtype=np.float32)
+    alpha = np.where(soft >= 175.0, 255.0, alpha)
+    alpha = np.where(soft <= 60.0, 0.0, alpha)
+    inner = _mask_morph(binary, 2, "erode")
+    alpha = np.where(inner > 0, 255.0, alpha)
+    outer = _mask_morph(binary, 2, "dilate")
+    alpha = np.where(outer <= 0, 0.0, alpha)
+    return np.clip(alpha, 0.0, 255.0).astype(np.uint8)
+
+
+def estimate_border_color(rgba: Image.Image) -> tuple[int, int, int] | None:
+    """从图像边缘的透明区域（背景）估计背景颜色（移植自 AI_Matting_V2）。
+
+    取上下左右各 8px 边框、alpha < 8 的像素，按通道取中位数。
+    用于对半透明边缘像素做 despill（去背景色溢色），防止边缘发灰/饱和度降低。
+    """
+    arr = np.asarray(rgba.convert("RGBA"))
+    h, w = arr.shape[:2]
+    if h < 16 or w < 16:
+        return None
+    alpha = arr[..., 3]
+    border = np.zeros((h, w), dtype=bool)
+    b = 8
+    border[:b, :] = True
+    border[-b:, :] = True
+    border[:, :b] = True
+    border[:, -b:] = True
+    mask = border & (alpha < 8)
+    if int(mask.sum()) < 10:
+        return None
+    colors = arr[..., :3][mask]
+    med = np.median(colors, axis=0)
+    return tuple(int(round(float(v))) for v in med)
+
+
+def despill_edges(
+    rgba: Image.Image,
+    background_rgb: tuple[int, int, int] | None = None,
+) -> Image.Image:
+    """透明边自动优化：去背景色溢色（despill，移植自 AI_Matting_V2）。
+
+    - background_rgb 为 None 时自动从图像边缘估计背景色；
+    - 对 0<alpha<1 的半透明边缘像素反解前景色，消除背景色渗入，
+      使主体在任意背景上合成时保持饱和度、不发灰；
+    - 不额外模糊 alpha，避免边缘发灰。
+    """
+    result = rgba.convert("RGBA").copy()
+    if background_rgb is None:
+        background_rgb = estimate_border_color(result)
+    if background_rgb is None:
+        return result
+    arr = np.array(result)
+    alpha = np.asarray(result.getchannel("A"), dtype=np.float32) / 255.0
+    rgb = np.asarray(result.convert("RGB"), dtype=np.float32)
+    bg = np.asarray(background_rgb, dtype=np.float32).reshape(1, 1, 3)
+    a = np.clip(alpha, 0.0, 1.0)[..., None]
+    band = (a > 0.02) & (a < 0.98)
+    denom = np.maximum(a, 1e-5)
+    fg = (rgb - (1.0 - a) * bg) / denom
+    fg = np.clip(fg, 0.0, 255.0)
+    rgb = np.where(band, fg, rgb)
+    arr[..., :3] = np.clip(rgb, 0, 255).astype(np.uint8)
+    return Image.fromarray(arr, mode="RGBA")
+
+
 _BRUSH_CACHE: dict[tuple[int, float], np.ndarray] = {}
 
 

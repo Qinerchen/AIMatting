@@ -8,7 +8,7 @@ from typing import Any
 
 
 APP_NAME = "AIMatting"
-APP_VERSION = "0.0.6"
+APP_VERSION = "0.0.8"
 
 
 def app_root() -> Path:
@@ -23,8 +23,19 @@ SETTINGS_PATH = app_root() / "settings.json"
 
 # 官方 BiRefNet 仓库（MIT License）发布的 ONNX 模型
 MODEL_REGISTRY: dict[str, dict[str, Any]] = {
+    "birefnet_general_v2": {
+        "name": "BiRefNet 通用模型（主体识别更完整，默认）",
+        "filename": "BiRefNet_HR-general-epoch_130.onnx",
+        "url": "https://github.com/ZhengPeng7/BiRefNet/releases/download/v1/"
+        "BiRefNet_HR-general-epoch_130.onnx",
+        "size_bytes": 1_098_928_953,
+        "recommended_max_side": 1024,
+        "input_shape": (2048, 2048),
+        "description": "与 AI_Matting_V2 同族的通用主体识别模型（官方 HR-general）："
+        "先识别完整主体再生成遮罩，配合清晰边缘后处理，复杂背景下识别更完整。",
+    },
     "birefnet_hr_matting": {
-        "name": "BiRefNet HR-matting（高精度抠图，推荐）",
+        "name": "BiRefNet HR-matting（高精度抠图）",
         "filename": "BiRefNet_HR-matting-epoch_135.onnx",
         "url": "https://github.com/ZhengPeng7/BiRefNet/releases/download/v1/"
         "BiRefNet_HR-matting-epoch_135.onnx",
@@ -34,20 +45,9 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         "description": "2048x2048 分辨率训练的 matting 模型，发丝、毛发、玻璃等"
         "半透明与细边缘场景效果好，适合 4K 及以下图像。",
     },
-    "birefnet_lite_2k": {
-        "name": "BiRefNet lite 2K（轻量快速）",
-        "filename": "BiRefNet_lite-general-2K-epoch_232.onnx",
-        "url": "https://github.com/ZhengPeng7/BiRefNet/releases/download/v1/"
-        "BiRefNet_lite-general-2K-epoch_232.onnx",
-        "size_bytes": 316 * 1024 * 1024,
-        "recommended_max_side": 1024,
-        "input_shape": (2560, 1440),
-        "description": "轻量通用分割模型，速度快、占用内存低，适合普通图片快速批处理，"
-        "边缘精细度略低于 HR-matting。",
-    },
 }
 
-DEFAULT_MODEL_ID = "birefnet_hr_matting"
+DEFAULT_MODEL_ID = "birefnet_general_v2"
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "model_id": DEFAULT_MODEL_ID,

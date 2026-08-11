@@ -6,7 +6,9 @@ from PIL import Image
 from aimatting.core.image_ops import (
     adjust_image,
     alpha_to_cutout,
+    build_clean_alpha,
     composite_background,
+    despill_edges,
     flatten_over_background,
     flatten_to_rgb,
     paint_mask,
@@ -83,6 +85,39 @@ def test_flatten_over_background_half_opacity_blends_white() -> None:
     out = flatten_over_background(img, alpha, (0, 0, 255), 0.5)
     # 背景层 = 蓝*0.5 + 白*0.5
     assert out.getpixel((0, 0)) == (127, 127, 255)
+
+
+def test_build_clean_alpha_fills_interior_and_cleans_background() -> None:
+    mask = np.zeros((64, 64), dtype=np.uint8)
+    mask[16:48, 16:48] = 200          # 主体
+    mask[31:34, 31:34] = 0            # 主体内部小洞
+    mask[8, 8] = 255                  # 背景孤立噪点
+    out = build_clean_alpha(mask, feather=1, edge_shrink=1, contrast=1.7)
+    assert out[40, 40] == 255         # 主体内部强制不透明
+    assert out[32, 32] == 255         # 内部小洞被闭运算填上
+    assert out[8, 8] == 0             # 背景噪点被开运算去掉
+    assert out[0, 0] == 0             # 背景保持透明
+
+
+def test_build_clean_alpha_thresholds() -> None:
+    mask = np.full((8, 8), 200, dtype=np.uint8)
+    mask[0:4, 0:4] = 50               # 明显背景
+    out = build_clean_alpha(mask, feather=0, edge_shrink=0, contrast=1.7)
+    assert out[6, 6] == 255
+    assert out[1, 1] == 0
+
+
+def test_despill_edges_removes_background_spill() -> None:
+    rgba = Image.new("RGBA", (32, 32), (255, 0, 0, 0))      # 红色透明背景
+    rgba.putpixel((16, 16), (127, 0, 0, 128))               # 半透明边缘像素
+    rgba.putpixel((8, 8), (200, 100, 50, 255))              # 不透明主体像素
+    out = despill_edges(rgba)
+    # 边缘像素反解前景色：去除红色背景渗入后接近 (0,0,0)
+    r, g, b, a = out.getpixel((16, 16))
+    assert a == 128
+    assert r < 10 and g < 10 and b < 10
+    # 不透明像素保持不变
+    assert out.getpixel((8, 8))[:3] == (200, 100, 50)
 
 
 def test_adjust_image_bounds() -> None:

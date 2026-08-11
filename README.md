@@ -11,7 +11,7 @@
 
 | 需求 | 实现 |
 | --- | --- |
-| 单张高精度抠图 | BiRefNet HR-matting / lite-2K 精细 matting，软 alpha，发丝、毛发、玻璃等边缘效果好 |
+| 单张高精度抠图 | BiRefNet 通用模型（默认，主体识别更完整）/ HR-matting（发丝等细边缘），清晰边缘 Alpha + 去背景色溢色 |
 | 笔刷遮罩 | 画前景 / 擦除笔刷，大致涂出主体即可；AI 自动做精细边缘；专业笔刷光标 |
 | 裁剪 | 框选保留区域，一键裁掉图片无用部分 |
 | 前后对比 | 原图 / 结果滑动对比条，随时检查抠图质量 |
@@ -25,7 +25,7 @@
 | 界面与交互 | 导入区、预览区、功能区、参数区四区布局；拖拽导入；滚轮缩放预览；进度提示 |
 | 输出 | PNG 透明素材 / PNG 带色背景 / JPG / WEBP；自定义保存目录与命名后缀 |
 | 窗口体验 | QGoodWindow 风格无边框窗口：原生缩放边框、拖拽贴靠（Win11 贴靠布局）、系统菜单、深色标题栏、自绘标题栏按钮，现代暗色主题 |
-| 模型快捷切换 | 顶部栏下拉框一键在 BiRefNet HR-matting / lite 2K 间切换，无需打开模型管理 |
+| 模型快捷切换 | 顶部栏下拉框一键在 BiRefNet 通用 / HR-matting 间切换，无需打开模型管理 |
 | 可靠性 | 模型下载断点续传 + 完整性校验；任务可取消；崩溃日志 |
 | 隐私 | 全本地处理，无广告、无捆绑、不联网收集数据 |
 
@@ -36,8 +36,9 @@
 - **推理**：ONNX Runtime（自动优先 CUDA GPU，无 GPU 时回退 CPU）
 - **算法**：[ZhengPeng7/BiRefNet](https://github.com/ZhengPeng7/BiRefNet)（MIT License）
   官方发布的 ONNX 模型：
+  - `BiRefNet_HR-general-epoch_130.onnx`（约 1.1GB，默认）：通用主体识别模型，
+    与 AI_Matting_V2 同族，先识别完整主体再生成遮罩，复杂背景下主体识别更完整
   - `BiRefNet_HR-matting-epoch_135.onnx`（约 1GB，推荐）：2048×2048 训练，抠图质量最佳
-  - `BiRefNet_lite-general-2K-epoch_232.onnx`（约 316MB）：轻量快速，适合批量与普通图片
 - **图像处理**：Pillow + NumPy，无 OpenCV 依赖
 
 ### 窗口实现
@@ -78,8 +79,8 @@ pip install onnxruntime-gpu
 ### 下载模型
 
 - 软件内：「模型管理」→ 选择模型 → 下载（带进度显示）。
-- 命令行：`python scripts/download_model.py`（默认下载 HR-matting）或
-  `python scripts/download_model.py --model lite`。
+- 命令行：`python scripts/download_model.py`（默认下载通用模型）或
+  `python scripts/download_model.py --model hr`。
 
 模型保存到 `models/` 目录，下载完成后离线可用。
 
@@ -129,11 +130,10 @@ pip install onnxruntime-gpu
 
 性能受硬件影响较大：
 
-- **注意**：当前两个捆绑 ONNX 模型均为固定输入尺寸
-  （HR-matting 为 2048×2048，lite 2K 为 2560×1440），
-  「输出设置 → 推理分辨率」选项对这两个模型暂不生效。
-- **GPU（RTX 4070 级别实测）**：lite 模型每张约 16-22 秒，
-  HR-matting 每张约 20-53 秒，显存占用约 12GB。
+- **注意**：当前捆绑的 ONNX 模型均为固定输入尺寸
+  （通用 / HR-matting 为 2048×2048），
+  「输出设置 → 推理分辨率」选项对这些模型暂不生效。
+- **GPU（RTX 4070 级别实测）**：通用 / HR-matting 每张约 3-20 秒，显存占用约 12GB。
 - **CPU**：明显更慢，建议仅在无独立显卡时使用。
 - 加速建议：在「输出设置」中勾选 **TensorRT 加速**（首次需构建引擎，
   耗时较长，失败会自动回退 CUDA/CPU）；或更换支持动态输入、
@@ -148,7 +148,7 @@ pip install onnxruntime-gpu
 - **抠图结果边缘粗糙**：质量优先时用 HR-matting 模型。
 - **JPG 为什么不能透明**：JPG/WEBP 格式不支持透明通道，半透明背景会平铺到白色底；
   透明素材请导出 PNG。
-- **大图卡顿**：4K 以上图片建议使用 lite 模型，并避免同时运行其他占显存的应用。
+- **大图卡顿**：4K 以上图片建议在「输出设置」中启用 TensorRT 加速，并避免同时运行其他占显存的应用。
 - **隐私**：模型推理、预览、导出全部在本机完成；软件不包含任何联网上报代码。
 - **无边框窗口**：顶部栏位于窗口最上方（导入、撤销、重做、模型切换、教程等
   都在这一栏），可拖动窗口、双击最大化/还原，右上角为自绘的最小化 / 最大化 / 关闭按钮；

@@ -108,7 +108,7 @@ class ModelManagerDialog(QDialog):
         layout.addLayout(btn_row)
 
         note = CaptionLabel(
-            "提示：模型较大（约 316MB / 1GB），下载需联网，"
+            "提示：模型较大（约 316MB / 1GB / 1.1GB），下载需联网，"
             "完成后保存在软件 models 目录，不会上传任何图片。"
         )
         note.setWordWrap(True)
@@ -337,7 +337,7 @@ a { color: #4C8DFF; }
       BiRefNet 会在遮罩范围内做精细 matting，边缘质量以 AI 结果为准。</li>
   <li><b>抠图很慢？</b> 取决于硬件：GPU 用户建议安装 <code>onnxruntime-gpu</code>；
       在「输出设置」中降低推理分辨率（512/1024）可明显提速，适合快速预览。</li>
-  <li><b>4K 大图内存占用高？</b> 软件按需加载，建议先使用 lite 模型或降低推理分辨率。</li>
+  <li><b>4K 大图内存占用高？</b> 软件按需加载，建议在「输出设置」中降低推理分辨率或启用 TensorRT 加速。</li>
   <li><b>JPG 为什么不能透明？</b> JPG/WEBP 格式本身不支持透明通道，会以白色为底合成；透明素材请导出 PNG。</li>
   <li><b>半透明背景导出后为什么有白底？</b> JPG 不支持透明，半透明背景会平铺到白色底上；PNG 可完整保留半透明。</li>
   <li><b>隐私安全吗？</b> 所有处理均在本机完成，不收集、不上传任何本地图片。</li>

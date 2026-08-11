@@ -11,7 +11,9 @@ from aimatting.core.engine import MattingEngine
 from aimatting.core.image_ops import (
     adjust_image,
     alpha_to_cutout,
+    build_clean_alpha,
     composite_background,
+    despill_edges,
     flatten_over_background,
     flatten_to_rgb,
     load_image,
@@ -76,19 +78,31 @@ class BatchTask(QThread):
                     alpha, _ = self._engine.matte(
                         rgb, max_side=fo["max_side"], progress=lambda _: None
                     )
+                    # 移植 AI_Matting_V2：清晰边缘 Alpha + 去背景色溢色
+                    alpha_img = Image.fromarray(
+                        build_clean_alpha(
+                            np.asarray(alpha, dtype=np.uint8),
+                            feather=1,
+                            edge_shrink=1,
+                            contrast=1.7,
+                        )
+                    )
+                    fg_rgb = despill_edges(alpha_to_cutout(rgb, alpha_img)).convert(
+                        "RGB"
+                    )
                     if fo["fmt"] in ("jpg", "webp"):
                         if fo["bg_enabled"]:
                             result = flatten_over_background(
-                                rgb, alpha, fo["bg_color"], fo["bg_opacity"]
+                                fg_rgb, alpha_img, fo["bg_color"], fo["bg_opacity"]
                             )
                         else:
-                            result = opaque_over_white(rgb, alpha, 1.0)
+                            result = opaque_over_white(fg_rgb, alpha_img, 1.0)
                     elif fo["bg_enabled"]:
                         result = composite_background(
-                            rgb, alpha, fo["bg_color"], fo["bg_opacity"]
+                            fg_rgb, alpha_img, fo["bg_color"], fo["bg_opacity"]
                         )
                     else:
-                        result = alpha_to_cutout(rgb, alpha)
+                        result = alpha_to_cutout(fg_rgb, alpha_img)
                     out_path = build_output_path(
                         path, opts.out_dir, fo["suffix"], fo["fmt"]
                     )
