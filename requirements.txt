@@ -1,0 +1,8 @@
+# onnxruntime-gpu：有 NVIDIA 显卡时自动走 CUDA（含 CPU 回退）；
+# 纯 CPU 机器可改回 onnxruntime 以减小安装体积
+PySide6>=6.8
+PySide6-Fluent-Widgets>=1.11.0
+onnxruntime-gpu>=1.20
+numpy>=1.26
+Pillow>=10.3
+requests>=2.31
