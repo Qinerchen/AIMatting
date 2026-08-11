@@ -73,7 +73,7 @@ class Eyedropper(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._picked: QColor | None = None
-        self._screens: list[tuple[object, QRect, QPixmap]] = []
+        self._screens: list[tuple[object, QRect, QImage]] = []
         self._capture_screens()
 
         self.setWindowFlags(
@@ -104,21 +104,21 @@ class Eyedropper(QDialog):
         self._screens = []
         for screen in QGuiApplication.screens():
             pixmap = screen.grabWindow(0)
-            self._screens.append((screen, screen.geometry(), pixmap))
+            # 只转换一次为 QImage，避免每帧对整屏重复 toImage()
+            self._screens.append((screen, screen.geometry(), pixmap.toImage()))
 
-    def _screen_and_pixmap_at(
+    def _screen_and_image_at(
         self, global_pos: QPoint
-    ) -> tuple[object | None, QRect | None, QPixmap | None]:
+    ) -> tuple[object | None, QRect | None, QImage | None]:
         for screen, geometry, pixmap in self._screens:
             if geometry.contains(global_pos):
                 return screen, geometry, pixmap
         return None, None, None
 
     def _color_at(self, global_pos: QPoint) -> QColor:
-        screen, geometry, pixmap = self._screen_and_pixmap_at(global_pos)
-        if geometry is None or pixmap is None or pixmap.isNull():
+        screen, geometry, image = self._screen_and_image_at(global_pos)
+        if geometry is None or image is None or image.isNull():
             return QColor(0, 0, 0)
-        image = pixmap.toImage()
         ratio = screen.devicePixelRatio() if screen is not None else 1.0
         local = global_pos - geometry.topLeft()
         x = max(0, min(image.width() - 1, int(local.x() * ratio)))
@@ -154,9 +154,8 @@ class Eyedropper(QDialog):
         painter.drawEllipse(center, radius, radius)
 
         # 圆内绘制放大的像素
-        screen, geometry, pixmap = self._screen_and_pixmap_at(pos)
-        if geometry is not None and pixmap is not None and not pixmap.isNull():
-            image = pixmap.toImage()
+        screen, geometry, image = self._screen_and_image_at(pos)
+        if geometry is not None and image is not None and not image.isNull():
             ratio = screen.devicePixelRatio() if screen is not None else 1.0
             local = pos - geometry.topLeft()
             cx, cy = center.x(), center.y()

@@ -148,6 +148,7 @@ class MattingEngine:
         self._input_name: str | None = None
         self._dynamic: bool = False
         self._provider: str = ""
+        self._tensorrt = False
         self._load_lock = threading.Lock()
 
     @property
@@ -160,6 +161,10 @@ class MattingEngine:
 
     def set_model_path(self, model_path: str | Path | None) -> None:
         self._model_path = str(model_path) if model_path else None
+
+    def set_tensorrt_enabled(self, enabled: bool) -> None:
+        """设置是否优先尝试 TensorRT EP（需已安装且支持）。"""
+        self._tensorrt = bool(enabled)
 
     @property
     def provider(self) -> str:
@@ -189,6 +194,9 @@ class MattingEngine:
             sess_options.inter_op_num_threads = 1
             sess_options.enable_cpu_mem_arena = True
             providers: list[str | tuple[str, dict]] = []
+            use_trt = self._tensorrt and "TensorrtExecutionProvider" in available
+            if use_trt:
+                providers.append("TensorrtExecutionProvider")
             if (
                 "CUDAExecutionProvider" in available
                 and _cuda_cudnn_available()
@@ -200,15 +208,30 @@ class MattingEngine:
                             "device_id": 0,
                             # 按需申请显存，避免一次性占满
                             "arena_extend_strategy": "kSameAsRequested",
+                            # 用启发式卷积搜索，避免首次推理长时间自动调优
+                            "cudnn_conv_algo_search": "HEURISTIC",
+                            "cudnn_conv_use_max_workspace": 1,
                         },
                     )
                 )
             if "DmlExecutionProvider" in available and not providers:
                 providers.append("DmlExecutionProvider")
             providers.append("CPUExecutionProvider")
-            self._session = ort.InferenceSession(
-                path, sess_options=sess_options, providers=providers
-            )
+            try:
+                self._session = ort.InferenceSession(
+                    path, sess_options=sess_options, providers=providers
+                )
+            except Exception:
+                # TensorRT 首次构建引擎可能失败（显存不足/算子不支持），回退 CUDA/CPU
+                if use_trt:
+                    providers = [
+                        p for p in providers if p != "TensorrtExecutionProvider"
+                    ]
+                    self._session = ort.InferenceSession(
+                        path, sess_options=sess_options, providers=providers
+                    )
+                else:
+                    raise
             # 以会话实际生效的 provider 为准，避免 CUDA 静默回退后仍显示 GPU
             active = self._session.get_providers()
             first = active[0] if active else ""

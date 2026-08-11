@@ -48,7 +48,11 @@ def build_output_path(
     src = Path(source_path)
     directory = Path(out_dir) if out_dir else src.parent
     name = src.stem + (suffix if suffix else "")
-    return directory / (name + output_extension(fmt))
+    target = directory / (name + output_extension(fmt))
+    # 防覆盖源文件：后缀为空且格式与原图一致时，自动追加安全后缀
+    if target.resolve() == src.resolve():
+        target = directory / (name + "_out" + output_extension(fmt))
+    return target
 
 
 def save_image(

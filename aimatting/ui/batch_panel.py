@@ -38,7 +38,7 @@ class BatchPanel(QWidget):
         super().__init__(parent)
         self._settings = settings
         self._overrides: dict[str, dict] = {}
-        self._item_status: dict[int, str] = {}
+        self._item_status: dict[str, str] = {}
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -100,6 +100,7 @@ class BatchPanel(QWidget):
         self.dir_edit.setPlaceholderText("默认与源图片同目录")
         dir_row.addWidget(self.dir_edit, 1)
         browse = PushButton("浏览")
+        self.dir_browse_button = browse
         dir_row.addWidget(browse)
         layout.addLayout(dir_row)
         browse.clicked.connect(self._browse_dir)
@@ -122,7 +123,7 @@ class BatchPanel(QWidget):
 
         self.add_button.clicked.connect(self._add_files)
         self.remove_button.clicked.connect(self._remove_selected)
-        self.clear_button.clicked.connect(self.file_list.clear)
+        self.clear_button.clicked.connect(self._clear_all)
         self.file_list.itemSelectionChanged.connect(self._update_selection_ui)
         self.edit_button.clicked.connect(self._emit_edit)
         self.start_button.clicked.connect(self._emit_start)
@@ -169,7 +170,17 @@ class BatchPanel(QWidget):
 
     def _remove_selected(self) -> None:
         for item in self.file_list.selectedItems():
+            path = item.data(Qt.ItemDataRole.UserRole)
+            self._overrides.pop(path, None)
+            self._item_status.pop(path, None)
             self.file_list.takeItem(self.file_list.row(item))
+
+    def _clear_all(self) -> None:
+        self.file_list.clear()
+        self._overrides.clear()
+        self._item_status.clear()
+        self.set_summary("未开始")
+        self.set_progress(0, 0)
 
     def _update_selection_ui(self) -> None:
         """选中单张显示「单独设置」，选中多张显示「批量设置」。"""
@@ -204,15 +215,17 @@ class BatchPanel(QWidget):
             for path in paths:
                 self._overrides[path] = dict(values)
             for r in rows:
-                self._refresh_item_text(r, self._item_status.get(r, ""))
+                item_path = self.file_list.item(r).data(Qt.ItemDataRole.UserRole)
+                self._refresh_item_text(
+                    r, self._item_status.get(item_path, "")
+                )
 
     def failed_rows(self) -> list[str]:
         failed = []
         for i in range(self.file_list.count()):
-            if "失败" in self._item_status.get(i, ""):
-                failed.append(
-                    self.file_list.item(i).data(Qt.ItemDataRole.UserRole)
-                )
+            path = self.file_list.item(i).data(Qt.ItemDataRole.UserRole)
+            if "失败" in self._item_status.get(path, ""):
+                failed.append(path)
         return failed
 
     def overrides(self) -> dict[str, dict]:
@@ -243,10 +256,17 @@ class BatchPanel(QWidget):
         self.clear_button.setEnabled(not running)
         self.item_settings_button.setEnabled(not running)
         self.retry_button.setEnabled(not running and bool(self.failed_rows()))
+        self.format_combo.setEnabled(not running)
+        self.suffix_edit.setEnabled(not running)
+        self.quality_spin.setEnabled(not running)
+        self.dir_edit.setEnabled(not running)
+        self.dir_browse_button.setEnabled(not running)
+        self.edit_button.setEnabled(not running and len(self.file_list.selectedItems()) == 1)
 
     def set_status(self, index: int, text: str) -> None:
         if 0 <= index < self.file_list.count():
-            self._item_status[index] = text
+            path = self.file_list.item(index).data(Qt.ItemDataRole.UserRole)
+            self._item_status[path] = text
             self._refresh_item_text(index, text)
 
     def set_progress(self, done: int, total: int) -> None:

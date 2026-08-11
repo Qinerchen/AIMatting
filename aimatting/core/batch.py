@@ -57,6 +57,7 @@ class BatchTask(QThread):
         total = len(opts.files)
         success = failed_count = 0
         t0 = time.perf_counter()
+        used_targets: dict[Path, int] = {}
         try:
             if not self._engine.loaded:
                 self._engine.load(self._engine.model_path or "")
@@ -87,11 +88,22 @@ class BatchTask(QThread):
                     out_path = build_output_path(
                         path, opts.out_dir, fo["suffix"], fo["fmt"]
                     )
+                    # 同一批内多个文件映射到同一输出路径时自动编号，避免互相覆盖
+                    if out_path in used_targets:
+                        n = used_targets[out_path] + 1
+                        out_path = out_path.with_name(
+                            f"{out_path.stem} ({n}){out_path.suffix}"
+                        )
+                        used_targets[out_path] = 0
+                    else:
+                        used_targets[out_path] = 0
                     save_image(result, out_path, fo["fmt"], fo["quality"])
                     success += 1
                     self.results[path] = "完成"
                     self.file_status.emit(index, name, "完成")
                 except Exception as exc:  # noqa: BLE001
+                    if self._stop:
+                        break
                     failed_count += 1
                     self.results[path] = f"失败：{exc}"
                     self.file_status.emit(index, name, f"失败：{exc}")

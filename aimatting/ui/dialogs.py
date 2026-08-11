@@ -34,6 +34,7 @@ from qfluentwidgets import (
 )
 
 from aimatting.core.config import (
+    APP_VERSION,
     MODEL_DIR,
     MODEL_REGISTRY,
     model_file_path,
@@ -98,8 +99,11 @@ class ModelManagerDialog(QDialog):
         btn_row = QHBoxLayout()
         self.download_button = PrimaryPushButton("下载选中模型")
         self.local_button = PushButton("选择本地 ONNX 文件…")
+        self.cancel_download_button = PushButton("取消下载")
+        self.cancel_download_button.hide()
         btn_row.addWidget(self.download_button)
         btn_row.addWidget(self.local_button)
+        btn_row.addWidget(self.cancel_download_button)
         btn_row.addStretch(1)
         layout.addLayout(btn_row)
 
@@ -119,6 +123,7 @@ class ModelManagerDialog(QDialog):
 
         self.download_button.clicked.connect(self._start_download)
         self.local_button.clicked.connect(self._pick_local)
+        self.cancel_download_button.clicked.connect(self._cancel_download)
 
     def _selected_model_id(self) -> str | None:
         for model_id, radio in self._radios.items():
@@ -152,15 +157,32 @@ class ModelManagerDialog(QDialog):
             return
         info = MODEL_REGISTRY[model_id]
         save_path = str(model_file_path(model_id))
-        self._download_task = ModelDownloadTask(info["url"], save_path, self)
+        self._download_task = ModelDownloadTask(
+            info["url"], save_path, parent=self
+        )
         self._download_task.progress.connect(self._on_progress)
         self._download_task.done.connect(lambda _: self._on_download_done(model_id))
         self._download_task.failed.connect(self._on_download_failed)
+        self._download_task.canceled.connect(self._on_download_canceled)
         self.download_button.setEnabled(False)
+        self.local_button.setEnabled(False)
+        self.cancel_download_button.show()
         self.progress.setVisible(True)
         self.progress.setValue(0)
         self.progress.setFormat(f"下载中 {info['filename']}：%p%")
         self._download_task.start()
+
+    def _cancel_download(self) -> None:
+        task = self._download_task
+        if task is not None:
+            try:
+                running = task.isRunning()
+            except RuntimeError:
+                running = False
+            if running:
+                task.stop()
+                self.cancel_download_button.setEnabled(False)
+                self.progress.setFormat("正在取消下载…")
 
     def _on_progress(self, downloaded: int, total: int, percent: int) -> None:
         if total:
@@ -172,6 +194,9 @@ class ModelManagerDialog(QDialog):
     def _on_download_done(self, model_id: str) -> None:
         self.progress.setVisible(False)
         self.download_button.setEnabled(True)
+        self.local_button.setEnabled(True)
+        self.cancel_download_button.hide()
+        self.cancel_download_button.setEnabled(True)
         self._radios[model_id].setChecked(True)
         self._update_status(model_id)
         self.model_changed.emit(model_id)
@@ -179,9 +204,34 @@ class ModelManagerDialog(QDialog):
     def _on_download_failed(self, message: str) -> None:
         self.progress.setVisible(False)
         self.download_button.setEnabled(True)
+        self.local_button.setEnabled(True)
+        self.cancel_download_button.hide()
+        self.cancel_download_button.setEnabled(True)
         box = MessageBox("下载失败", f"模型下载失败：\n{message}", self)
         box.yesButton.setText("知道了")
         box.exec()
+
+    def _on_download_canceled(self) -> None:
+        self.progress.setVisible(False)
+        self.download_button.setEnabled(True)
+        self.local_button.setEnabled(True)
+        self.cancel_download_button.hide()
+        self.cancel_download_button.setEnabled(True)
+        for label in self._status_labels.values():
+            label.setText("状态：已取消（临时文件已清理）")
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        """关闭对话框时先停止下载线程，避免线程随对话框销毁。"""
+        task = self._download_task
+        if task is not None:
+            try:
+                running = task.isRunning()
+            except RuntimeError:
+                running = False
+            if running:
+                task.stop()
+                task.wait(5000)
+        super().closeEvent(event)
 
     def _pick_local(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -227,7 +277,7 @@ class AboutDialog(QDialog):
         self.setMinimumWidth(420)
         FluentStyleSheet.DIALOG.apply(self)
         layout = QVBoxLayout(self)
-        title = TitleLabel("AIMatting v0.0.4")
+        title = TitleLabel(f"AIMatting v{APP_VERSION}")
         layout.addWidget(title)
         text = BodyLabel(
             "基于 BiRefNet（MIT License）高精度抠图算法，"

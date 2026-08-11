@@ -6,7 +6,9 @@ onnxruntime 创建 InferenceSession 时持有 GIL，即使放在线程里也会�
 from __future__ import annotations
 
 import multiprocessing as mp
+import queue
 import threading
+import time
 from typing import Callable
 
 from PIL import Image
@@ -30,9 +32,11 @@ def _worker_main(queue, result) -> None:
                 return
             if kind == "load":
                 path = msg[1]
+                use_trt = bool(msg[2]) if len(msg) > 2 else False
                 if engine is None:
                     engine = MattingEngine()
                 engine.set_model_path(path)
+                engine.set_tensorrt_enabled(use_trt)
                 engine.load(path)
                 result.put(("load_done", engine.provider))
             elif kind == "unload":
@@ -73,6 +77,7 @@ class RemoteMattingEngine:
         self._result: mp.Queue | None = None
         self._proc: mp.Process | None = None
         self._lock = threading.Lock()
+        self._tensorrt = False
         # 惰性启动：真正需要加载模型时才拉起子进程
 
     def _ensure_started(self) -> None:
@@ -104,6 +109,9 @@ class RemoteMattingEngine:
     def set_model_path(self, model_path) -> None:
         self._model_path = str(model_path) if model_path else None
 
+    def set_tensorrt_enabled(self, enabled: bool) -> None:
+        self._tensorrt = bool(enabled)
+
     def load(
         self,
         model_path: str | None = None,
@@ -119,8 +127,17 @@ class RemoteMattingEngine:
             self._ensure_started()
             if progress:
                 progress("正在加载模型…")
-            self._send(("load", path))
-            kind, payload = self._result.get(timeout=300)
+            self._send(("load", path, self._tensorrt))
+            deadline = time.monotonic() + 300
+            while True:
+                if self._proc is None or not self._proc.is_alive():
+                    raise RuntimeError("模型进程异常退出，请重新打开软件")
+                try:
+                    kind, payload = self._result.get(timeout=0.5)
+                    break
+                except queue.Empty:
+                    if time.monotonic() > deadline:
+                        raise RuntimeError("模型加载超时")
             if kind == "load_done":
                 self._loaded = True
                 self._model_path = path
@@ -139,8 +156,16 @@ class RemoteMattingEngine:
                 return
             try:
                 self._send(("unload", None))
+                deadline = time.monotonic() + 10
                 while True:
-                    kind, _payload = self._result.get(timeout=10)
+                    if self._proc is not None and not self._proc.is_alive():
+                        break
+                    try:
+                        kind, _payload = self._result.get(timeout=0.5)
+                    except queue.Empty:
+                        if time.monotonic() > deadline:
+                            break
+                        continue
                     if kind in ("unload_done", "unload_failed"):
                         break
             except Exception:  # noqa: BLE001
@@ -163,9 +188,12 @@ class RemoteMattingEngine:
             w, h = rgb.size
             self._send(("matte", w, h, rgb.tobytes(), int(max_side)))
             while True:
-                if self._proc is not None and not self._proc.is_alive():
+                if self._proc is None or not self._proc.is_alive():
                     raise RuntimeError("模型进程异常退出，请重新打开软件")
-                kind, payload = self._result.get(timeout=600)
+                try:
+                    kind, payload = self._result.get(timeout=1.0)
+                except queue.Empty:
+                    continue
                 if kind == "progress":
                     if progress:
                         progress(payload)
@@ -193,6 +221,24 @@ class RemoteMattingEngine:
                 pass
             self._loaded = False
             self._provider = ""
+
+    def cancel(self) -> None:
+        """强制终止推理子进程（取消任务/关闭窗口时调用），下次使用自动重启。"""
+        proc = self._proc
+        if proc is not None:
+            try:
+                if proc.is_alive():
+                    proc.terminate()
+                    proc.join(timeout=2)
+                    if proc.is_alive():
+                        proc.kill()
+            except Exception:  # noqa: BLE001
+                pass
+        self._proc = None
+        self._queue = None
+        self._result = None
+        self._loaded = False
+        self._provider = ""
 
     def _send(self, msg: tuple) -> None:
         if self._queue is None:

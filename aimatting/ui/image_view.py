@@ -122,6 +122,7 @@ class ImageView(QGraphicsView):
         pixmap = QPixmap.fromImage(qimg.copy())
         self._item.setPixmap(pixmap)
         self._overlay_item.setPixmap(QPixmap())
+        self._overlay_item.setScale(1.0)
         self._scene.setSceneRect(self._item.boundingRect())
         if self._crop_mode and self._crop_rect is None:
             self._crop_rect = self._image_rect()
@@ -132,10 +133,21 @@ class ImageView(QGraphicsView):
     def clear_image(self) -> None:
         self._item.setPixmap(QPixmap())
         self._overlay_item.setPixmap(QPixmap())
+        self._overlay_item.setScale(1.0)
         self._scene.setSceneRect(QRectF(0, 0, 0, 0))
 
     def set_overlay(self, pixmap: QPixmap) -> None:
         self._overlay_item.setPixmap(pixmap)
+        self._overlay_item.setScale(1.0)
+
+    def set_overlay_scaled(self, pixmap: QPixmap, full_size) -> None:
+        """以低分辨率覆盖层显示，避免大图时每笔生成全尺寸图。"""
+        if pixmap.isNull():
+            self._overlay_item.setPixmap(QPixmap())
+            self._overlay_item.setScale(1.0)
+            return
+        self._overlay_item.setPixmap(pixmap)
+        self._overlay_item.setScale(full_size[0] / max(1, pixmap.width()))
 
     @property
     def has_image(self) -> bool:

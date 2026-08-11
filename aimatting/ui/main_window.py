@@ -58,6 +58,7 @@ from aimatting.core.config import (
 from aimatting.core.history import (
     HistoryManager,
     make_snapshot,
+    snapshot_base_image,
     snapshot_original_image,
     snapshot_to_images,
 )
@@ -87,7 +88,7 @@ from aimatting.ui.batch_panel import BatchPanel
 from aimatting.ui.dialogs import AboutDialog, ModelManagerDialog, TutorialDialog
 from aimatting.ui.image_view import ImageView
 from aimatting.ui.panels import ParamPanel, ToolPanel, _circular_arrow_icon
-from aimatting.workers.tasks import MattingTask, ModelPreloadTask
+from aimatting.workers.tasks import ImageEditTask, MattingTask, ModelPreloadTask
 
 
 def _pil_to_pixmap(image: Image.Image) -> QPixmap:
@@ -114,6 +115,9 @@ class MainWindow(FluentWindow):
 
         self.settings = Settings()
         self.engine = RemoteMattingEngine()
+        self.engine.set_tensorrt_enabled(
+            bool(self.settings.get("use_tensorrt", False))
+        )
         self.history = HistoryManager(max_steps=20)
         self._set_engine_model_path()
         self._status_labels: list[BodyLabel] = []
@@ -140,6 +144,7 @@ class MainWindow(FluentWindow):
         self._matte_task: MattingTask | None = None
         self._preload_task: ModelPreloadTask | None = None
         self._batch_task: BatchTask | None = None
+        self._defringe_task: ImageEditTask | None = None
         self.compare_enabled = False
         self._crop_mode = False
         self._active_tool = ""                        # "" / mask / crop / preprocess / bg
@@ -185,7 +190,9 @@ class MainWindow(FluentWindow):
 
         self._build_ui()
         self._connect_signals()
+        self._applied_preprocess = dict(self.tool_panel.get_preprocess())
         self._update_ui_state()
+        self._update_resolution_note()
         self.status("就绪")
         self._startup_model_check()
         self._preload_default_model()
@@ -460,6 +467,10 @@ class MainWindow(FluentWindow):
         self.undo_action.setShortcut(QKeySequence("Ctrl+Z"))
         self.redo_action = QAction("重做", self)
         self.redo_action.setShortcut(QKeySequence("Ctrl+Y"))
+        self.matte_action = QAction("开始抠图", self)
+        self.matte_action.setShortcut(QKeySequence("Ctrl+R"))
+        self.save_action = QAction("保存 / 导出", self)
+        self.save_action.setShortcut(QKeySequence("Ctrl+S"))
         self.model_action = QAction("模型管理", self)
         self.tutorial_action = QAction("使用教程", self)
         self.tutorial_action.setShortcut(QKeySequence("F1"))
@@ -468,6 +479,8 @@ class MainWindow(FluentWindow):
             self.import_action,
             self.undo_action,
             self.redo_action,
+            self.matte_action,
+            self.save_action,
             self.model_action,
             self.tutorial_action,
             self.about_action,
@@ -479,6 +492,8 @@ class MainWindow(FluentWindow):
         self.import_action.triggered.connect(self.import_image)
         self.undo_action.triggered.connect(self.undo)
         self.redo_action.triggered.connect(self.redo)
+        self.matte_action.triggered.connect(self.start_matte)
+        self.save_action.triggered.connect(self.save_current)
         self.model_action.triggered.connect(self.open_model_manager)
         self.tutorial_action.triggered.connect(self.open_tutorial)
         self.about_action.triggered.connect(self.open_about)
@@ -510,6 +525,7 @@ class MainWindow(FluentWindow):
         self.panel.defringe_requested.connect(self._apply_defringe)
         self.panel.matte_requested.connect(self.start_matte)
         self.panel.save_requested.connect(self.save_current)
+        self.panel.tensorrt_check.toggled.connect(self._on_tensorrt_toggled)
 
         self.view.brushStroke.connect(self._on_brush_stroke)
         self.view.brushStrokeFinished.connect(self._on_brush_finished)
@@ -562,6 +578,7 @@ class MainWindow(FluentWindow):
         self.alpha = None
         self.history.clear()
         self.prep_source = base
+        self._applied_preprocess = dict(self.tool_panel.get_preprocess())
         self._paint_changed = False
         self._clear_mask_state()
         self._reset_view_modes()
@@ -606,15 +623,17 @@ class MainWindow(FluentWindow):
             # 拖动中的实时预览：只更新低分辨率预览，不修改工作图、不入历史
             self._render_preprocess_preview()
             return
-        if self.alpha is not None:
-            # 保留历史：把当前状态入栈，预处理变化可撤销
-            self.history.push(
-                self.working_rgb,
-                Image.fromarray(self.alpha),
-                prep,
-            )
+        # 保留历史：把当前状态入栈，预处理变化可撤销（含抠图前）
+        old_prep = dict(self._applied_preprocess)
+        self.history.push(
+            self.working_rgb,
+            Image.fromarray(self.alpha) if self.alpha is not None else None,
+            old_prep,
+            base=self.prep_source,
+        )
         base = self.prep_source or self.original_image
         self.working_rgb = adjust_image(base, **prep)
+        self._applied_preprocess = dict(prep)
         self.fg_rgb = None
         self._paint_changed = False
         self._clear_mask_state()
@@ -752,6 +771,7 @@ class MainWindow(FluentWindow):
             Image.fromarray(self.mask_prior)
             if self.mask_prior is not None
             else None,
+            base=self.prep_source,
         )
         self._paint_changed = False
         provider = self.engine.provider
@@ -1053,6 +1073,7 @@ class MainWindow(FluentWindow):
                 self.working_rgb,
                 Image.fromarray(self._retouch_before),
                 self.tool_panel.get_preprocess(),
+                base=self.prep_source,
             )
             self._retouch_before = None
             self.status("橡皮擦微调已应用（Ctrl+Z 可撤销）")
@@ -1084,6 +1105,7 @@ class MainWindow(FluentWindow):
                 self.working_rgb,
                 Image.fromarray(self.alpha),
                 self.tool_panel.get_preprocess(),
+                base=self.prep_source,
             )
             self.alpha = (
                 self.alpha.astype(np.float32)
@@ -1091,7 +1113,10 @@ class MainWindow(FluentWindow):
             ).astype(np.uint8)
         else:
             self.history.push(
-                source, mask_img, self.tool_panel.get_preprocess()
+                source,
+                mask_img,
+                self.tool_panel.get_preprocess(),
+                base=self.prep_source,
             )
         self.working_rgb = cutout
         self.prep_source = cutout
@@ -1113,32 +1138,43 @@ class MainWindow(FluentWindow):
             return
         if self.mask_prior is None and not self._crop_mode:
             # 无遮罩且非裁剪模式：清掉旧 overlay，避免每次重建全尺寸透明图
-            self.view.set_overlay(QPixmap())
+            self.view.set_overlay_scaled(QPixmap(), self.working_rgb.size)
             return
         w, h = self.working_rgb.size
-        arr = np.zeros((h, w, 4), dtype=np.uint8)
+        # 覆盖层按最多 2048px 生成，再整体缩放到图片尺寸，避免大图逐笔重建全尺寸图
+        cap = 2048
+        scale = min(1.0, cap / max(w, h))
+        ow = max(1, int(round(w * scale)))
+        oh = max(1, int(round(h * scale)))
+        arr = np.zeros((oh, ow, 4), dtype=np.uint8)
         if self.mask_prior is not None and self._active_tool == "mask":
-            m = self.mask_prior
+            m = np.asarray(
+                Image.fromarray(self.mask_prior).resize(
+                    (ow, oh), Image.Resampling.BILINEAR
+                )
+            )
             strong = m >= 180
             weak = (m > 15) & ~strong
             arr[strong] = (56, 235, 120, 95)
             arr[weak] = (56, 235, 120, 45)
-        qimg = QImage(arr.data, w, h, w * 4, QImage.Format.Format_RGBA8888).copy()
+        qimg = QImage(
+            arr.data, ow, oh, ow * 4, QImage.Format.Format_RGBA8888
+        ).copy()
         pixmap = QPixmap.fromImage(qimg)
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         if self._crop_mode:
             rect = self.view.crop_rect()
             if rect is not None:
-                x0 = max(0, min(w, int(round(rect.left()))))
-                y0 = max(0, min(h, int(round(rect.top()))))
-                x1 = max(0, min(w, int(round(rect.right()))))
-                y1 = max(0, min(h, int(round(rect.bottom()))))
+                x0 = max(0, min(ow, int(round(rect.left() * scale))))
+                y0 = max(0, min(oh, int(round(rect.top() * scale))))
+                x1 = max(0, min(ow, int(round(rect.right() * scale))))
+                y1 = max(0, min(oh, int(round(rect.bottom() * scale))))
                 shade = QColor(0, 0, 0, 150)
-                painter.fillRect(0, 0, w, y0, shade)
-                painter.fillRect(0, y1, w, h - y1, shade)
+                painter.fillRect(0, 0, ow, y0, shade)
+                painter.fillRect(0, y1, ow, oh - y1, shade)
                 painter.fillRect(0, y0, x0, y1 - y0, shade)
-                painter.fillRect(x1, y0, w - x1, y1 - y0, shade)
+                painter.fillRect(x1, y0, ow - x1, y1 - y0, shade)
                 painter.setPen(QPen(QColor(255, 255, 255), 3))
                 painter.drawRect(x0, y0, x1 - x0, y1 - y0)
                 grid_pen = QPen(QColor(255, 255, 255, 110), 1)
@@ -1149,7 +1185,7 @@ class MainWindow(FluentWindow):
                     gy = y0 + (y1 - y0) * i / 3
                     painter.drawLine(int(gx), y0, int(gx), y1)
                     painter.drawLine(x0, int(gy), x1, int(gy))
-                hs = 14
+                hs = max(6, int(14 * scale))
                 hx = (x0, (x0 + x1) // 2, x1)
                 hy = (y0, (y0 + y1) // 2, y1)
                 hover_handle = self.view.crop_hover_handle()
@@ -1180,7 +1216,7 @@ class MainWindow(FluentWindow):
                             cx - size // 2, cy - size // 2, size, size
                         )
         painter.end()
-        self.view.set_overlay(pixmap)
+        self.view.set_overlay_scaled(pixmap, (w, h))
 
     # ------------------------------------------------------------------
     # 裁剪
@@ -1247,6 +1283,7 @@ class MainWindow(FluentWindow):
                 else None
             ),
             original=self.original_image,
+            base=self.prep_source,
         )
         self.original_image = self.original_image.crop((x0, y0, x1, y1))
         if self.prep_source is not None:
@@ -1352,6 +1389,8 @@ class MainWindow(FluentWindow):
             self._confirm_crop()
 
     def _apply_feather(self, radius: int) -> None:
+        if self._busy:
+            return
         if self.alpha is None:
             self._info("提示", "请先完成抠图。")
             return
@@ -1365,6 +1404,7 @@ class MainWindow(FluentWindow):
             self.working_rgb,
             Image.fromarray(self.alpha),
             self.tool_panel.get_preprocess(),
+            base=self.prep_source,
         )
         self._render(fit=False)
         self.status("已应用边缘羽化")
@@ -1379,6 +1419,7 @@ class MainWindow(FluentWindow):
             self.working_rgb,
             Image.fromarray(self.alpha),
             self.tool_panel.get_preprocess(),
+            base=self.prep_source,
         )
         self._render(fit=False)
         self.status("已反选遮罩")
@@ -1389,18 +1430,54 @@ class MainWindow(FluentWindow):
         self._render(fit=False)
 
     def _apply_defringe(self, radius: int) -> None:
+        if self._busy:
+            return
         if self.alpha is None:
             self._info("提示", "请先完成抠图。")
+            return
+        if radius <= 0:
             return
         alpha_img = Image.fromarray(self.alpha)
         self.history.push(
             self.working_rgb,
             alpha_img,
             self.tool_panel.get_preprocess(),
+            base=self.prep_source,
         )
-        self.fg_rgb = defringe(self.working_rgb, alpha_img, int(radius))
+        self._set_busy(True)
+        self.single_status.setText("正在去除色边…")
+        self.status("正在去除色边…")
+
+        def run() -> Image.Image:
+            return defringe(
+                self.working_rgb,
+                alpha_img,
+                int(radius),
+                should_stop=lambda: (
+                    getattr(self, "_defringe_task", None) is not None
+                    and self._defringe_task._stop
+                ),
+            )
+
+        task = ImageEditTask(run, self)
+        self._defringe_task = task
+        task.done.connect(self._on_defringe_done)
+        task.failed.connect(self._on_defringe_failed)
+        task.finished.connect(lambda: setattr(self, "_defringe_task", None))
+        task.finished.connect(task.deleteLater)
+        task.start()
+
+    def _on_defringe_done(self, result: Image.Image) -> None:
+        self._set_busy(False)
+        self.fg_rgb = result
         self._render(fit=False)
-        self.status(f"已去除色边（半径 {radius}）")
+        self.status("已去除色边")
+        self._update_ui_state()
+
+    def _on_defringe_failed(self, message: str) -> None:
+        self._set_busy(False)
+        self.status("去色边失败")
+        self._critical("去色边失败", message)
         self._update_ui_state()
 
     def _on_zoom_changed(self, zoom: float) -> None:
@@ -1421,7 +1498,8 @@ class MainWindow(FluentWindow):
             self._render(fit=False)
 
     def _cancel_current_task(self) -> None:
-        for attr in ("_matte_task", "_batch_task"):
+        stopped = False
+        for attr in ("_matte_task", "_batch_task", "_defringe_task"):
             task = getattr(self, attr, None)
             try:
                 running = task is not None and task.isRunning()
@@ -1429,6 +1507,10 @@ class MainWindow(FluentWindow):
                 running = False
             if running:
                 task.stop()
+                stopped = True
+        if stopped:
+            # 强制终止推理子进程，让当前这一张立即停止而不是等它跑完
+            self.engine.cancel()
         self.status("正在取消任务…")
 
     # ------------------------------------------------------------------
@@ -1446,6 +1528,7 @@ class MainWindow(FluentWindow):
                 else None
             ),
             self.original_image,
+            base=self.prep_source,
         )
 
     def undo(self) -> None:
@@ -1461,8 +1544,9 @@ class MainWindow(FluentWindow):
     def _restore_snapshot(self, snap) -> None:
         source, alpha_img, mask_img = snapshot_to_images(snap)
         original_img = snapshot_original_image(snap)
+        base_img = snapshot_base_image(snap)
         self.working_rgb = source
-        self.prep_source = source
+        self.prep_source = base_img if base_img is not None else source
         self.fg_rgb = None
         if original_img is not None:
             self.original_image = original_img
@@ -1473,6 +1557,7 @@ class MainWindow(FluentWindow):
         )
         if snap.preprocess is not None:
             self.tool_panel.set_preprocess(snap.preprocess)
+            self._applied_preprocess = dict(snap.preprocess)
         self._paint_changed = False
         self._clear_mask_state()
         if mask_img is not None:
@@ -1643,6 +1728,9 @@ class MainWindow(FluentWindow):
         return None
 
     def _set_engine_model_path(self) -> None:
+        self.engine.set_tensorrt_enabled(
+            bool(self.settings.get("use_tensorrt", False))
+        )
         self.engine.set_model_path(self._current_model_path())
 
     def _preload_default_model(self) -> None:
@@ -1679,7 +1767,7 @@ class MainWindow(FluentWindow):
         if model_id == "birefnet_hr_matting":
             self.status(
                 "当前为 CPU 推理且使用 HR 大模型，速度较慢；"
-                "建议切换「BiRefNet lite 2K」或调低推理分辨率"
+                "建议切换「BiRefNet lite 2K」或在输出设置中启用 TensorRT"
             )
 
     def _on_model_preload_failed(self, message: str) -> None:
@@ -1707,6 +1795,20 @@ class MainWindow(FluentWindow):
         self._update_model_label()
         self.status("模型已更新，可开始抠图")
 
+    def _on_tensorrt_toggled(self, enabled: bool) -> None:
+        """TensorRT 开关变化：保存设置并重载模型（若已加载）。"""
+        self.settings.set("use_tensorrt", bool(enabled))
+        self.settings.save()
+        if self.engine.loaded:
+            self.engine.unload()
+        self._set_engine_model_path()
+        self._preload_default_model()
+        self.status(
+            "TensorRT 已启用，正在重载模型…"
+            if enabled
+            else "已关闭 TensorRT，正在重载模型…"
+        )
+
     def _update_model_label(self) -> None:
         model_id = self.settings.get("model_id", "")
         if model_id in MODEL_REGISTRY:
@@ -1718,6 +1820,22 @@ class MainWindow(FluentWindow):
         text = f"模型：{label}｜引擎：{self.engine.provider}"
         for model_label in self._model_labels:
             model_label.setText(text)
+        self._update_resolution_note()
+
+    def _update_resolution_note(self) -> None:
+        """根据当前模型提示推理分辨率设置是否生效。"""
+        if not hasattr(self, "panel"):
+            return
+        model_id = self.settings.get("model_id", "")
+        info = MODEL_REGISTRY.get(model_id, {})
+        shape = info.get("input_shape")
+        if shape:
+            ih, iw = shape
+            self.panel.set_resolution_note(
+                f"当前模型固定输入 {iw}×{ih}，推理分辨率选项暂不生效"
+            )
+        else:
+            self.panel.set_resolution_note("")
 
     # ------------------------------------------------------------------
     # 教程 / 关于
@@ -1785,6 +1903,7 @@ class MainWindow(FluentWindow):
         return box.exec()
 
     def _set_busy(self, busy: bool) -> None:
+        has_alpha = self.alpha is not None
         self._busy = busy
         self.import_action.setEnabled(not busy)
         self.import_button.setEnabled(not busy)
@@ -1792,6 +1911,9 @@ class MainWindow(FluentWindow):
         self.redo_action.setEnabled(not busy)
         self.panel.matte_button.setEnabled(not busy)
         self.panel.save_button.setEnabled(not busy)
+        self.panel.feather_button.setEnabled(has_alpha and not busy)
+        self.panel.defringe_button.setEnabled(has_alpha and not busy)
+        self.compare_button.setEnabled(has_alpha and not busy)
         self.tool_panel.set_tools_enabled(not busy)
         self.batch_panel.add_button.setEnabled(not busy)
         self.cancel_button.setVisible(busy)
@@ -1855,6 +1977,7 @@ class MainWindow(FluentWindow):
         settings.set("save_dir", save_dir)
         settings.set("infer_max_side", max_side)
         settings.set("release_model_after_matte", self.panel.get_release_model())
+        settings.set("use_tensorrt", self.panel.get_tensorrt())
         settings.set_preprocess(self.tool_panel.get_preprocess())
         size, hardness, _ = self.tool_panel.get_brush()
         settings.set("brush_size", size)
@@ -1864,25 +1987,47 @@ class MainWindow(FluentWindow):
         settings.set("retouch_hardness", r_hardness)
         settings.save()
 
+    def _stop_all_tasks(self) -> None:
+        """给所有运行中的任务线程发出停止信号。"""
+        for attr in ("_matte_task", "_batch_task", "_defringe_task", "_preload_task"):
+            task = getattr(self, attr, None)
+            if task is None:
+                continue
+            try:
+                running = task.isRunning()
+            except RuntimeError:
+                running = False
+            if running:
+                task.stop()
+
     def closeEvent(self, event) -> None:  # noqa: N802
         self._persist_settings()
-        preload = self._preload_task
-        try:
-            still_running = preload is not None and preload.isRunning()
-        except RuntimeError:
-            still_running = False
-        if still_running:
-            preload.wait(1500)
-        if not still_running:
-            self.engine.unload()
+        self._stop_all_tasks()
+        # 先终止推理子进程，让阻塞在推理上的任务线程尽快退出
+        self.engine.cancel()
+        for task in (
+            self._matte_task,
+            self._batch_task,
+            self._defringe_task,
+            self._preload_task,
+        ):
+            if task is None:
+                continue
+            try:
+                running = task.isRunning()
+            except RuntimeError:
+                running = False
+            if running:
+                task.wait(3000)
         self.engine.shutdown()
+        self.history.shutdown()
+        self.history.clear()
         self.original_image = None
         self.prep_source = None
         self.working_rgb = None
         self.fg_rgb = None
         self.alpha = None
         self.mask_prior = None
-        self.history.clear()
         self.view.clear_image()
         gc.collect()
         super().closeEvent(event)

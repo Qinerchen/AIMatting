@@ -846,12 +846,22 @@ class ParamPanel(QWidget):
         side_row.addWidget(self.max_side_combo, 1)
         layout.addLayout(side_row)
 
+        self.resolution_note = _muted_note("")
+        self.resolution_note.setVisible(False)
+        layout.addWidget(self.resolution_note)
+
         self.release_model_check = CheckBox("抠图完成后自动释放模型内存")
         layout.addWidget(self.release_model_check)
         release_note = _muted_note(
             "勾选后，抠图完成会立即释放模型内存，下次抠图需重新加载。"
         )
         layout.addWidget(release_note)
+
+        self.tensorrt_check = CheckBox("TensorRT 加速（若可用）")
+        self.tensorrt_check.setToolTip(
+            "首次使用需构建引擎，耗时较长；构建失败会自动回退 CUDA/CPU。"
+        )
+        layout.addWidget(self.tensorrt_check)
 
         dir_row = QHBoxLayout()
         dir_row.addWidget(CaptionLabel("保存目录"))
@@ -890,6 +900,9 @@ class ParamPanel(QWidget):
         self.release_model_check.setChecked(
             bool(self._settings.get("release_model_after_matte", True))
         )
+        self.tensorrt_check.setChecked(
+            bool(self._settings.get("use_tensorrt", False))
+        )
         self.dir_edit.setText(str(self._settings.get("save_dir", "")))
 
     def _connect_signals(self) -> None:
@@ -926,6 +939,13 @@ class ParamPanel(QWidget):
 
     def get_release_model(self) -> bool:
         return self.release_model_check.isChecked()
+
+    def get_tensorrt(self) -> bool:
+        return self.tensorrt_check.isChecked()
+
+    def set_resolution_note(self, text: str) -> None:
+        self.resolution_note.setText(text)
+        self.resolution_note.setVisible(bool(text))
 
     def set_release_model(self, enabled: bool) -> None:
         self.release_model_check.setChecked(bool(enabled))

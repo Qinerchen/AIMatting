@@ -8,7 +8,7 @@ from typing import Any
 
 
 APP_NAME = "AIMatting"
-APP_VERSION = "0.0.4"
+APP_VERSION = "0.0.5"
 
 
 def app_root() -> Path:
@@ -30,6 +30,7 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         "BiRefNet_HR-matting-epoch_135.onnx",
         "size_bytes": 1_048 * 1024 * 1024,
         "recommended_max_side": 2048,
+        "input_shape": (2048, 2048),
         "description": "2048x2048 分辨率训练的 matting 模型，发丝、毛发、玻璃等"
         "半透明与细边缘场景效果好，适合 4K 及以下图像。",
     },
@@ -40,6 +41,7 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         "BiRefNet_lite-general-2K-epoch_232.onnx",
         "size_bytes": 316 * 1024 * 1024,
         "recommended_max_side": 1024,
+        "input_shape": (2560, 1440),
         "description": "轻量通用分割模型，速度快、占用内存低，适合普通图片快速批处理，"
         "边缘精细度略低于 HR-matting。",
     },
@@ -63,7 +65,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "retouch_hardness": 70,
     "auto_matte": True,           # 导入图片后自动执行一次抠图
     "defringe_radius": 4,         # 去色边扩散半径
-    "release_model_after_matte": False,  # 默认常驻模型，避免每次抠图重新加载
+    "release_model_after_matte": True,   # 抠图完成后释放模型内存
+    "use_tensorrt": False,               # 优先使用 TensorRT（若可用）
     "preprocess": {               # 亮度/对比度/饱和度/色温，-100..100
         "brightness": 0,
         "contrast": 0,

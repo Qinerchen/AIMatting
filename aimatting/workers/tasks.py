@@ -96,6 +96,7 @@ class ModelDownloadTask(QThread):
     progress = Signal(int, int, int)   # 已下载字节, 总字节, 百分比
     done = Signal(str)
     failed = Signal(str)
+    canceled = Signal()
 
     def __init__(
         self,
@@ -142,8 +143,37 @@ class ModelDownloadTask(QThread):
                     break
                 time.sleep(1.0)
         if self._stop:
+            # 用户取消：清理未完成的临时文件
+            try:
+                partial.unlink(missing_ok=True)
+            except OSError:
+                pass
+            self.canceled.emit()
             return
         self.failed.emit(str(last_error or "下载失败"))
+
+
+class ImageEditTask(QThread):
+    """通用图像处理任务（如去色边），后台执行避免卡 UI。"""
+
+    done = Signal(object)   # 结果 PIL.Image
+    failed = Signal(str)
+
+    def __init__(self, fn, parent=None) -> None:
+        super().__init__(parent)
+        self._fn = fn
+        self._stop = False
+
+    def stop(self) -> None:
+        self._stop = True
+
+    def run(self) -> None:
+        try:
+            result = self._fn()
+            self.done.emit(result)
+        except Exception as exc:  # noqa: BLE001
+            if not self._stop:
+                self.failed.emit(str(exc))
 
     def _download_once(self, partial: Path) -> None:
         import requests

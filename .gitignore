@@ -9,3 +9,5 @@ settings.json
 *.log
 .idea/
 .vscode/
+_sam_*.png
+onnxruntime_profile__*.json

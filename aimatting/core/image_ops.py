@@ -248,7 +248,12 @@ def mask_bbox(
     return x0, y0, x1, y1
 
 
-def defringe(image: Image.Image, alpha, radius: int = 4) -> Image.Image:
+def defringe(
+    image: Image.Image,
+    alpha,
+    radius: int = 4,
+    should_stop=None,
+) -> Image.Image:
     """去除半透明边缘的彩色描边（色边）。
 
     原理：以完全不透明前景为种子，向半透明边缘逐层"扩散填充"最近前景色，
@@ -272,6 +277,8 @@ def defringe(image: Image.Image, alpha, radius: int = 4) -> Image.Image:
     out = arr.copy()
     radius = max(1, int(radius))
     for _ in range(radius):
+        if should_stop is not None and should_stop():
+            break
         unknown = ~known
         if not unknown.any():
             break
