@@ -30,6 +30,7 @@ from qfluentwidgets import (
     Slider,
     SpinBox,
     TitleLabel,
+    ToolButton,
 )
 
 from aimatting.core.config import (
@@ -39,6 +40,7 @@ from aimatting.core.config import (
     model_status,
 )
 from aimatting.core.io_utils import FORMAT_LABELS
+from aimatting.ui.eyedropper import eyedropper_icon
 from aimatting.workers.tasks import ModelDownloadTask
 
 
@@ -322,9 +324,9 @@ class BatchItemSettingsDialog(QDialog):
         self.color_button = PushButton("背景颜色")
         self.color_button.setFixedWidth(100)
         color_row.addWidget(self.color_button)
-        self.pipette_button = PushButton("吸管")
-        self.pipette_button.setFixedWidth(56)
-        self.pipette_button.setToolTip("从屏幕任意位置取色")
+        self.pipette_button = ToolButton(eyedropper_icon(), self)
+        self.pipette_button.setFixedSize(30, 30)
+        self.pipette_button.setToolTip("屏幕取色（吸管）")
         color_row.addWidget(self.pipette_button)
         self.hex_label = CaptionLabel(self._hex())
         color_row.addWidget(self.hex_label)

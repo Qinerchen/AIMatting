@@ -1062,7 +1062,9 @@ class MainWindow(FluentWindow):
             self.tool_panel.set_active_tool("crop")
             self._brush_mode = "none"
             self.tool_panel.set_brush_mode("none")
-            self.status("裁剪：拖动框选区域，拖动边角/边线调整，Enter 确定 / Esc 取消")
+            self.status(
+                "裁剪：拖动框选区域，拖动边角/边线调整，双击或 Enter 确定 / Esc 取消"
+            )
         else:
             if was_active and self._active_tool == "crop":
                 self._active_tool = ""

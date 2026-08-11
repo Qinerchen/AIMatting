@@ -6,7 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PIL import Image
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
-from PySide6.QtGui import QKeyEvent, QWheelEvent
+from PySide6.QtGui import QKeyEvent, QMouseEvent, QWheelEvent
 
 
 def _view():
@@ -63,11 +63,36 @@ def test_enter_emits_tool_action() -> None:
     assert got
 
 
-def test_crop_blank_click_confirms() -> None:
+def test_crop_single_click_outside_does_not_confirm() -> None:
     from aimatting.ui.image_view import ImageView
 
     view = ImageView()
     view.set_pil_image(Image.new("RGB", (100, 60), "red"))
+    view.resize(400, 300)
     view.set_crop_mode(True)
-    assert view._crop_click_outside_image(QPointF(150, 80)) is True
-    assert view._crop_click_outside_image(QPointF(50, 30)) is False
+    got = []
+    view.cropConfirmed.connect(lambda: got.append(True))
+
+    # 图片外单击不再确认
+    outside_view = view.mapFromScene(QPointF(150, 80))
+    press = QMouseEvent(
+        QEvent.Type.MouseButtonPress,
+        QPointF(outside_view),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    view.mousePressEvent(press)
+    assert not got
+
+    # 图片内双击确认
+    center_view = view.mapFromScene(QPointF(50, 30))
+    dblclick = QMouseEvent(
+        QEvent.Type.MouseButtonDblClick,
+        QPointF(center_view),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    view.mouseDoubleClickEvent(dblclick)
+    assert got

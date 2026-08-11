@@ -35,11 +35,13 @@ from qfluentwidgets import (
     Slider,
     SpinBox,
     TabWidget,
+    ToolButton,
     ToggleToolButton,
 )
 
 from aimatting.core.image_ops import PRESET_COLORS
 from aimatting.core.io_utils import FORMAT_LABELS
+from aimatting.ui.eyedropper import eyedropper_icon
 
 
 def _slider_row(
@@ -246,7 +248,11 @@ class ToolPanel(QWidget):
                 "笔刷遮罩",
                 "涂抹主体区域，点「确定」只保留画笔部分、删除其余",
             ),
-            ("crop", "裁剪", "框选要保留的区域，Enter 确定 / Esc 取消"),
+            (
+                "crop",
+                "裁剪",
+                "框选要保留的区域，双击或 Enter 确定 / Esc 取消",
+            ),
             ("preprocess", "预处理", "调整亮度/对比度/饱和度/色温，实时作用到当前图片"),
             ("bg", "背景填充", "为抠图结果合成纯色背景（预览与导出）"),
             ("retouch", "橡皮擦", "抠图后微调：擦除没抠干净的区域，或恢复误删的区域"),
@@ -391,7 +397,7 @@ class ToolPanel(QWidget):
 
         note = _muted_note(
             "进入裁剪后自动选中整张图：拖动框体移动，拖动边角/边线调整大小，"
-            "Enter 确定、Esc 取消。"
+            "双击或 Enter 确定、Esc 取消。"
         )
         layout.addWidget(note)
         layout.addStretch(1)
@@ -455,9 +461,9 @@ class ToolPanel(QWidget):
         self.color_preview = PushButton("自定义颜色")
         self.color_preview.setFixedSize(90, 30)
         custom_row.addWidget(self.color_preview)
-        self.pipette_button = PushButton("吸管")
-        self.pipette_button.setFixedWidth(56)
-        self.pipette_button.setToolTip("从屏幕任意位置取色")
+        self.pipette_button = ToolButton(eyedropper_icon(), self)
+        self.pipette_button.setFixedSize(30, 30)
+        self.pipette_button.setToolTip("屏幕取色（吸管）")
         custom_row.addWidget(self.pipette_button)
         self.hex_edit = LineEdit()
         self.hex_edit.setMaxLength(9)

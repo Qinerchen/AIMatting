@@ -1,14 +1,15 @@
 """屏幕取色（吸管）：全屏透明覆盖层 + 跟随光标的放大镜预览。"""
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QRect, Qt
+from PySide6.QtCore import QPoint, QRect, Qt, QTimer
 from PySide6.QtGui import (
     QColor,
     QCursor,
-    QGuiApplication,
+    QIcon,
     QPainter,
     QPen,
     QPixmap,
+    QGuiApplication,
     QRegion,
 )
 from PySide6.QtWidgets import QDialog, QWidget
@@ -17,6 +18,50 @@ from PySide6.QtWidgets import QDialog, QWidget
 _PATCH = 15       # 采样区域边长（像素）
 _SCALE = 12       # 每个像素放大倍数
 _RADIUS = _PATCH * _SCALE // 2
+
+
+def eyedropper_icon() -> QIcon:
+    """吸管按钮图标：斜杆 + 顶部圆球 + 底部尖嘴。"""
+    def draw(p, color: QColor) -> None:
+        pen = QPen(
+            color,
+            2.4,
+            Qt.PenStyle.SolidLine,
+            Qt.PenCapStyle.RoundCap,
+            Qt.PenJoinStyle.RoundJoin,
+        )
+        p.setPen(pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        # 斜杆
+        p.drawLine(QPoint(5, 24), QPoint(19, 10))
+        # 顶部圆球（吸管头）
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(color)
+        p.drawEllipse(QPoint(21, 8), 3.6, 3.6)
+        # 底部尖嘴
+        p.drawPolygon(
+            [
+                QPoint(2, 26),
+                QPoint(9, 26),
+                QPoint(5, 22),
+            ]
+        )
+
+    icon = QIcon()
+    icon.addPixmap(_paint_icon(draw, QColor("#E6E8EE")), QIcon.Mode.Normal)
+    icon.addPixmap(_paint_icon(draw, QColor("#4C8DFF")), QIcon.Mode.Active)
+    icon.addPixmap(_paint_icon(draw, QColor("#4C8DFF")), QIcon.Mode.Selected)
+    return icon
+
+
+def _paint_icon(draw, color: QColor) -> QPixmap:
+    pm = QPixmap(28, 28)
+    pm.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pm)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    draw(painter, color)
+    painter.end()
+    return pm
 
 
 class Eyedropper(QDialog):
@@ -42,6 +87,9 @@ class Eyedropper(QDialog):
         self.setCursor(Qt.CursorShape.CrossCursor)
         self.setGeometry(self._virtual_geometry())
         self.setModal(True)
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setInterval(30)
+        self._refresh_timer.timeout.connect(self.update)
 
     # ------------------------------------------------------------------
     # 屏幕采集与取色
@@ -76,6 +124,14 @@ class Eyedropper(QDialog):
         x = max(0, min(image.width() - 1, int(local.x() * ratio)))
         y = max(0, min(image.height() - 1, int(local.y() * ratio)))
         return QColor(image.pixel(x, y))
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._refresh_timer.start()
+
+    def hideEvent(self, event) -> None:  # noqa: N802
+        self._refresh_timer.stop()
+        super().hideEvent(event)
 
     def color(self) -> QColor:
         return self._picked or QColor(0, 0, 0)
@@ -173,6 +229,10 @@ class Eyedropper(QDialog):
         elif event.button() == Qt.MouseButton.RightButton:
             self.reject()
             event.accept()
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        self.update()
+        event.accept()
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         if event.key() == Qt.Key.Key_Escape:

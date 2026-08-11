@@ -43,3 +43,10 @@ def test_eyedropper_constructs() -> None:
         assert picker.color().isValid()
     finally:
         picker.deleteLater()
+
+
+def test_eyedropper_icon_is_not_null() -> None:
+    from aimatting.ui.eyedropper import eyedropper_icon
+
+    icon = eyedropper_icon()
+    assert not icon.isNull()

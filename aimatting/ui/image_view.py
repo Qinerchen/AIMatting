@@ -303,7 +303,7 @@ class ImageView(QGraphicsView):
         return QRectF(self._item.boundingRect())
 
     def _crop_click_outside_image(self, scene_pos: QPointF) -> bool:
-        """点击图片外空白处 = 确认裁剪。"""
+        """判断场景点是否位于图片外（不再用于确认裁剪）。"""
         return self._crop_rect is not None and not self._image_rect().contains(scene_pos)
 
     def _clamp_rect(self, rect: QRectF) -> QRectF:
@@ -449,7 +449,8 @@ class ImageView(QGraphicsView):
         if self._crop_mode and event.button() == Qt.MouseButton.LeftButton:
             pos = self.mapToScene(event.position().toPoint())
             if self._crop_click_outside_image(pos):
-                self.cropConfirmed.emit()
+                # 单击图片外空白处不再确认裁剪，避免误触；
+                # 双击或按 Enter 才完成裁剪。
                 event.accept()
                 return
             handle = self._handle_at(event.position())
@@ -473,6 +474,19 @@ class ImageView(QGraphicsView):
             event.accept()
             return
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
+        if self._crop_mode and event.button() == Qt.MouseButton.LeftButton:
+            pos = self.mapToScene(event.position().toPoint())
+            if (
+                self._crop_rect is not None
+                and self._crop_rect.contains(pos)
+                and self._image_rect().contains(pos)
+            ):
+                self.cropConfirmed.emit()
+                event.accept()
+                return
+        super().mouseDoubleClickEvent(event)
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
         if self._compare_dragging and self._compare_enabled:
