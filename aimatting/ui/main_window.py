@@ -57,6 +57,7 @@ from aimatting.core.config import (
 )
 from aimatting.core.history import (
     HistoryManager,
+    make_snapshot,
     snapshot_original_image,
     snapshot_to_images,
 )
@@ -198,7 +199,13 @@ class MainWindow(FluentWindow):
         self.single_interface = self._build_single_interface()
         self.single_interface.setObjectName("singleInterface")
         self.batch_panel = BatchPanel(self.settings)
-        self.batch_panel.setObjectName("batchInterface")
+        self.batch_page = QWidget()
+        self.batch_page.setObjectName("batchInterface")
+        batch_layout = QVBoxLayout(self.batch_page)
+        batch_layout.setContentsMargins(16, 12, 16, 8)
+        batch_layout.setSpacing(8)
+        batch_layout.addWidget(self.batch_panel, 1)
+        batch_layout.addWidget(self._make_status_bar(False))
 
         self.addSubInterface(
             self.single_interface,
@@ -207,7 +214,7 @@ class MainWindow(FluentWindow):
             NavigationItemPosition.TOP,
         )
         self.addSubInterface(
-            self.batch_panel,
+            self.batch_page,
             FluentIcon.LIBRARY,
             "批量",
             NavigationItemPosition.TOP,
@@ -289,6 +296,11 @@ class MainWindow(FluentWindow):
         center_layout.setSpacing(6)
 
         self.view = ImageView()
+        self.view.setStyleSheet(
+            "QGraphicsView { background: transparent;"
+            " border: 1px solid rgba(255,255,255,0.10);"
+            " border-radius: 14px; }"
+        )
         center_layout.addWidget(self.view, 1)
 
         zoom_row = QHBoxLayout()
@@ -536,6 +548,10 @@ class MainWindow(FluentWindow):
         self.original_image = image
         self.prep_source = image
         self._exit_all_tools()
+        # 新图片默认预处理归零，避免沿用上一张图的亮度/对比度等设置
+        self.tool_panel.set_preprocess(
+            {"brightness": 0, "contrast": 0, "saturation": 0, "temperature": 0}
+        )
         self._reset_working()
 
     def _reset_working(self) -> None:
@@ -1123,7 +1139,7 @@ class MainWindow(FluentWindow):
                 painter.fillRect(0, y1, w, h - y1, shade)
                 painter.fillRect(0, y0, x0, y1 - y0, shade)
                 painter.fillRect(x1, y0, w - x1, y1 - y0, shade)
-                painter.setPen(QPen(QColor(255, 255, 255), 2))
+                painter.setPen(QPen(QColor(255, 255, 255), 3))
                 painter.drawRect(x0, y0, x1 - x0, y1 - y0)
                 grid_pen = QPen(QColor(255, 255, 255, 110), 1)
                 grid_pen.setStyle(Qt.PenStyle.DashLine)
@@ -1133,18 +1149,36 @@ class MainWindow(FluentWindow):
                     gy = y0 + (y1 - y0) * i / 3
                     painter.drawLine(int(gx), y0, int(gx), y1)
                     painter.drawLine(x0, int(gy), x1, int(gy))
-                hs = 9
+                hs = 14
                 hx = (x0, (x0 + x1) // 2, x1)
                 hy = (y0, (y0 + y1) // 2, y1)
-                for cx in hx:
-                    for cy in hy:
-                        if cx == (x0 + x1) // 2 and cy == (y0 + y1) // 2:
+                hover_handle = self.view.crop_hover_handle()
+                names = {
+                    (0, 0): "nw",
+                    (1, 0): "n",
+                    (2, 0): "ne",
+                    (0, 1): "w",
+                    (2, 1): "e",
+                    (0, 2): "sw",
+                    (1, 2): "s",
+                    (2, 2): "se",
+                }
+                for ix, cx in enumerate(hx):
+                    for iy, cy in enumerate(hy):
+                        if (ix, iy) == (1, 1):
                             continue
+                        size = hs + 4 if names[(ix, iy)] == hover_handle else hs
                         painter.fillRect(
-                            cx - hs // 2, cy - hs // 2, hs, hs, QColor(76, 141, 255)
+                            cx - size // 2,
+                            cy - size // 2,
+                            size,
+                            size,
+                            QColor(76, 141, 255),
                         )
-                        painter.setPen(QPen(QColor(255, 255, 255), 1.2))
-                        painter.drawRect(cx - hs // 2, cy - hs // 2, hs, hs)
+                        painter.setPen(QPen(QColor(255, 255, 255), 2))
+                        painter.drawRect(
+                            cx - size // 2, cy - size // 2, size, size
+                        )
         painter.end()
         self.view.set_overlay(pixmap)
 
@@ -1400,8 +1434,22 @@ class MainWindow(FluentWindow):
     # ------------------------------------------------------------------
     # 撤销 / 重做
     # ------------------------------------------------------------------
+    def _current_snapshot(self):
+        """把当前界面状态打包，供撤销时记录“操作后”状态以支持重做。"""
+        return make_snapshot(
+            self.working_rgb,
+            Image.fromarray(self.alpha) if self.alpha is not None else None,
+            self.tool_panel.get_preprocess(),
+            (
+                Image.fromarray(self.mask_prior)
+                if self.mask_prior is not None
+                else None
+            ),
+            self.original_image,
+        )
+
     def undo(self) -> None:
-        snap = self.history.undo()
+        snap = self.history.undo(self._current_snapshot())
         if snap:
             self._restore_snapshot(snap)
 
@@ -1697,7 +1745,7 @@ class MainWindow(FluentWindow):
         ]
         if not paths:
             return
-        if self.stackedWidget.currentWidget() is self.batch_panel:
+        if self.stackedWidget.currentWidget() is self.batch_page:
             self.batch_panel.add_paths(paths)
             self.status(f"已加入批量列表：{len(paths)} 张")
         else:

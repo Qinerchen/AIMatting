@@ -29,6 +29,9 @@ def test_main_window_constructs() -> None:
         # 导入与工具同列：工具面板位于「单张」页左侧栏内
         assert win.tool_panel.parent() is win.single_left
         assert win.stackedWidget.count() == 2
+        assert win.batch_page is not None
+        # 单张页与批量页各有一条状态栏
+        assert len(win._status_labels) == 2
     finally:
         win.close()
 
@@ -279,6 +282,25 @@ def test_crop_can_be_undone_before_matte() -> None:
         win.undo()
         assert win.working_rgb.size == (100, 80)
         assert win.original_image.size == (100, 80)
+
+        win.redo()
+        assert win.working_rgb.size == (50, 40)
+    finally:
+        win.close()
+
+
+def test_import_new_image_resets_preprocess(tmp_path) -> None:
+    from aimatting.ui.main_window import MainWindow
+
+    path = tmp_path / "reset.png"
+    Image.new("RGB", (32, 32), (100, 100, 100)).save(path)
+    win = MainWindow()
+    try:
+        win.tool_panel.prep_sliders["brightness"].setValue(40)
+        win.tool_panel.prep_sliders["contrast"].setValue(-30)
+        win.import_image(str(path))
+        assert win.tool_panel.prep_sliders["brightness"].value() == 0
+        assert win.tool_panel.prep_sliders["contrast"].value() == 0
     finally:
         win.close()
 

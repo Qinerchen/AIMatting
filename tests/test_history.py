@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from PIL import Image
 
-from aimatting.core.history import HistoryManager, snapshot_to_images
+from aimatting.core.history import (
+    HistoryManager,
+    make_snapshot,
+    snapshot_to_images,
+)
 
 
 def _image(color=0) -> Image.Image:
@@ -57,3 +61,12 @@ def test_push_clears_redo() -> None:
     assert history.can_redo()
     history.push(_image(3), _alpha(3))
     assert history.can_redo() is False
+
+
+def test_redo_restores_after_state() -> None:
+    history = HistoryManager(5)
+    history.push(_image(10), None)  # 操作前
+    before = history.undo(make_snapshot(_image(20), None))  # 当前=操作后
+    assert snapshot_to_images(before)[0].getpixel((0, 0)) == (10, 10, 10)
+    after = history.redo()
+    assert snapshot_to_images(after)[0].getpixel((0, 0)) == (20, 20, 20)

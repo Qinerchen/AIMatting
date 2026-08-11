@@ -2,7 +2,14 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QEasingCurve, QPointF, QRectF, Qt, QVariantAnimation, Signal
-from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPen, QPixmap
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QImage,
+    QPainter,
+    QPen,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem,
     QGraphicsPixmapItem,
@@ -89,6 +96,7 @@ class ImageView(QGraphicsView):
         self._brush_hardness = 0.7
         self._crop_mode = False
         self._crop_rect: QRectF | None = None
+        self._crop_hover_handle: str | None = None
         self._crop_drag: str | None = None  # "create" | "move" | 手柄名称
         self._crop_drag_offset = QPointF()
         self._crop_start_rect = QRectF()
@@ -138,8 +146,9 @@ class ImageView(QGraphicsView):
         if self.has_image:
             self._stop_zoom_anim()
             self.fitInView(self._item, Qt.AspectRatioMode.KeepAspectRatio)
-            self._zoom = 1.0
-            self.zoomChanged.emit(1.0)
+            # 显示真实缩放比例，避免「适合窗口」后标签仍写 100%
+            self._zoom = self.transform().m11()
+            self.zoomChanged.emit(self._zoom)
 
     def actual_size(self) -> None:
         self._stop_zoom_anim()
@@ -275,6 +284,7 @@ class ImageView(QGraphicsView):
     def set_crop_mode(self, active: bool) -> None:
         self._crop_mode = bool(active)
         self._crop_drag = None
+        self._crop_hover_handle = None
         if active:
             self._brush_active = False
             self.setDragMode(QGraphicsView.DragMode.NoDrag)
@@ -293,6 +303,10 @@ class ImageView(QGraphicsView):
         if self._crop_rect is None:
             return None
         return QRectF(self._crop_rect)
+
+    def crop_hover_handle(self) -> str | None:
+        """当前鼠标悬停/拖拽中的裁剪控制点，用于高亮反馈。"""
+        return self._crop_hover_handle
 
     def clear_crop_rect(self) -> None:
         self._crop_rect = None
@@ -327,7 +341,7 @@ class ImageView(QGraphicsView):
                 y0 = max(bounds.top(), y1 - _MIN_CROP)
         return QRectF(x0, y0, x1 - x0, y1 - y0)
 
-    def _handle_at(self, view_pos: QPointF, tolerance: float = 12.0) -> str | None:
+    def _handle_at(self, view_pos: QPointF, tolerance: float = 18.0) -> str | None:
         if self._crop_rect is None:
             return None
         rect = self._crop_rect
@@ -498,6 +512,7 @@ class ImageView(QGraphicsView):
         if self._crop_mode:
             pos = self.mapToScene(event.position().toPoint())
             if self._crop_drag:
+                self._crop_hover_handle = self._crop_drag
                 if self._crop_drag == "create":
                     self._crop_rect = self._clamp_rect(
                         QRectF(self._crop_drag_offset, pos)
@@ -515,6 +530,10 @@ class ImageView(QGraphicsView):
                     )
                 self.cropRectChanged.emit()
             else:
+                handle = self._handle_at(event.position())
+                if handle != self._crop_hover_handle:
+                    self._crop_hover_handle = handle
+                    self.cropRectChanged.emit()
                 self.setCursor(self._crop_cursor(event.position()))
             event.accept()
             return
@@ -533,6 +552,7 @@ class ImageView(QGraphicsView):
             return
         if self._crop_mode and self._crop_drag and event.button() == Qt.MouseButton.LeftButton:
             self._crop_drag = None
+            self._crop_hover_handle = self._handle_at(event.position())
             self.cropRectChanged.emit()
             event.accept()
             return

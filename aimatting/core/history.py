@@ -20,7 +20,8 @@ class HistoryManager:
     def __init__(self, max_steps: int = 20) -> None:
         self._max_steps = max(1, int(max_steps))
         self._undo: list[Snapshot] = []
-        self._redo: list[Snapshot] = []
+        # 每一项是 (操作前, 操作后)，供重做真正恢复到操作后的状态
+        self._redo: list[tuple[Snapshot, Snapshot]] = []
 
     def push(
         self,
@@ -43,19 +44,21 @@ class HistoryManager:
             self._undo.pop(0)
         self._redo.clear()
 
-    def undo(self) -> Snapshot | None:
+    def undo(self, current: Snapshot | None = None) -> Snapshot | None:
         if not self._undo:
             return None
-        snap = self._undo.pop()
-        self._redo.append(snap)
-        return snap
+        before = self._undo.pop()
+        # current 是操作后的当前状态；未提供时退化为 before（测试场景）
+        after = current if current is not None else before
+        self._redo.append((before, after))
+        return before
 
     def redo(self) -> Snapshot | None:
         if not self._redo:
             return None
-        snap = self._redo.pop()
-        self._undo.append(snap)
-        return snap
+        before, after = self._redo.pop()
+        self._undo.append(before)
+        return after
 
     def can_undo(self) -> bool:
         return bool(self._undo)
@@ -95,3 +98,20 @@ def snapshot_original_image(snap: Snapshot) -> Image.Image | None:
     if not snap.original_png:
         return None
     return Image.open(io.BytesIO(snap.original_png)).copy()
+
+
+def make_snapshot(
+    source: Image.Image,
+    alpha: Image.Image | None = None,
+    preprocess: dict | None = None,
+    mask: Image.Image | None = None,
+    original: Image.Image | None = None,
+) -> Snapshot:
+    """把当前界面状态打包成历史快照（用于撤销/重做）。"""
+    return Snapshot(
+        _png_bytes(source),
+        _png_bytes(alpha) if alpha is not None else None,
+        dict(preprocess) if preprocess else None,
+        _png_bytes(mask) if mask is not None else None,
+        _png_bytes(original) if original is not None else None,
+    )
