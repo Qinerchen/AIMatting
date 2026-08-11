@@ -394,7 +394,9 @@ class BatchItemSettingsDialog(QDialog):
 
     def _refresh_color(self) -> None:
         self.color_button.setStyleSheet(
-            f"PushButton {{ background: {self._hex()}; border: 1px solid #999; }}"
+            f"PushButton {{ background: {self._hex()};"
+            " border: 1px solid rgba(255,255,255,0.25);"
+            " border-radius: 6px; }"
         )
         self.hex_label.setText(self._hex())
 

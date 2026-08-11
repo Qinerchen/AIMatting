@@ -55,7 +55,11 @@ from aimatting.core.config import (
     app_root,
     model_file_path,
 )
-from aimatting.core.history import HistoryManager, snapshot_to_images
+from aimatting.core.history import (
+    HistoryManager,
+    snapshot_original_image,
+    snapshot_to_images,
+)
 from aimatting.core.image_ops import (
     adjust_image,
     alpha_to_cutout,
@@ -213,6 +217,7 @@ class MainWindow(FluentWindow):
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
+        splitter.setHandleWidth(1)
         splitter.setSizes([300, 700, 340])
         root.addWidget(splitter, 1)
 
@@ -1103,13 +1108,18 @@ class MainWindow(FluentWindow):
             return
         x0, y0, x1, y1 = box
         had_alpha = self.alpha is not None
-        if had_alpha:
-            # 抠图后裁剪：保留抠图结果，裁剪 alpha 并允许撤销
-            self.history.push(
-                self.working_rgb,
-                Image.fromarray(self.alpha),
-                self.tool_panel.get_preprocess(),
-            )
+        # 裁剪前入栈：无论是否已抠图，都支持 Ctrl+Z / 左上角撤销按钮恢复
+        self.history.push(
+            self.working_rgb,
+            Image.fromarray(self.alpha) if had_alpha else None,
+            self.tool_panel.get_preprocess(),
+            (
+                Image.fromarray(self.mask_prior)
+                if self.mask_prior is not None
+                else None
+            ),
+            original=self.original_image,
+        )
         self.original_image = self.original_image.crop((x0, y0, x1, y1))
         if self.prep_source is not None:
             self.prep_source = self.prep_source.crop((x0, y0, x1, y1))
@@ -1308,9 +1318,12 @@ class MainWindow(FluentWindow):
 
     def _restore_snapshot(self, snap) -> None:
         source, alpha_img, mask_img = snapshot_to_images(snap)
+        original_img = snapshot_original_image(snap)
         self.working_rgb = source
         self.prep_source = source
         self.fg_rgb = None
+        if original_img is not None:
+            self.original_image = original_img
         self.alpha = (
             np.asarray(alpha_img, dtype=np.uint8).copy()
             if alpha_img is not None
@@ -1324,6 +1337,13 @@ class MainWindow(FluentWindow):
             self.mask_prior = np.asarray(mask_img, dtype=np.uint8).copy()
         self._render(fit=False)
         self.status("已恢复操作记录")
+        if original_img is not None:
+            name = Path(self.current_path).name if self.current_path else ""
+            self.file_info.setText(
+                f"文件名：{name}\n尺寸：{self.working_rgb.width} × "
+                f"{self.working_rgb.height}"
+            )
+            self._update_drop_preview()
         self._update_ui_state()
 
     # ------------------------------------------------------------------

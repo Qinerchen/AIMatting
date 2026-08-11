@@ -450,7 +450,9 @@ class ToolPanel(QWidget):
             text_color = "#FFFFFF" if _is_dark(hex_color) else "#000000"
             btn.setStyleSheet(
                 f"PushButton {{ background: {hex_color}; color: {text_color};"
-                " border: 1px solid #999; padding: 0px; }"
+                " border: 1px solid rgba(255,255,255,0.22);"
+                " border-radius: 6px; padding: 0px; }"
+                "PushButton:hover { border: 2px solid rgba(255,255,255,0.9); }"
             )
             btn.clicked.connect(lambda _=False, h=hex_color: self._set_color(h))
             self._color_widgets.append(btn)
@@ -631,7 +633,8 @@ class ToolPanel(QWidget):
         self.hex_edit.setText(self._current_hex)
         self.color_preview.setStyleSheet(
             f"PushButton {{ background: {self._current_hex};"
-            " border: 1px solid #999; }"
+            " border: 1px solid rgba(255,255,255,0.25);"
+            " border-radius: 6px; }"
         )
         self.rgb_spins["R"].setValue(color.red())
         self.rgb_spins["G"].setValue(color.green())
@@ -658,7 +661,8 @@ class ToolPanel(QWidget):
         self.hex_edit.setText(self._current_hex)
         self.color_preview.setStyleSheet(
             f"PushButton {{ background: {self._current_hex};"
-            " border: 1px solid #999; }"
+            " border: 1px solid rgba(255,255,255,0.25);"
+            " border-radius: 6px; }"
         )
         self.bg_changed.emit()
 

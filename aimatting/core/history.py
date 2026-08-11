@@ -13,6 +13,7 @@ class Snapshot:
     alpha_png: bytes | None = None
     preprocess: dict | None = None
     mask_png: bytes | None = None
+    original_png: bytes | None = None
 
 
 class HistoryManager:
@@ -27,6 +28,7 @@ class HistoryManager:
         alpha: Image.Image | None,
         preprocess: dict | None = None,
         mask: Image.Image | None = None,
+        original: Image.Image | None = None,
     ) -> None:
         self._undo.append(
             Snapshot(
@@ -34,6 +36,7 @@ class HistoryManager:
                 _png_bytes(alpha) if alpha is not None else None,
                 dict(preprocess) if preprocess else None,
                 _png_bytes(mask) if mask is not None else None,
+                _png_bytes(original) if original is not None else None,
             )
         )
         if len(self._undo) > self._max_steps:
@@ -85,3 +88,10 @@ def snapshot_to_images(snap: Snapshot) -> tuple[Image.Image, Image.Image | None,
             else None
         ),
     )
+
+
+def snapshot_original_image(snap: Snapshot) -> Image.Image | None:
+    """返回快照中记录的原始导入图（裁剪撤销用），没有则为 None。"""
+    if not snap.original_png:
+        return None
+    return Image.open(io.BytesIO(snap.original_png)).copy()

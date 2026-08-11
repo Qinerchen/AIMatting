@@ -39,6 +39,13 @@ def main() -> int:
     app.setWindowIcon(QIcon(str(app_root() / "assets" / "aimatting_icon.png")))
     setTheme(Theme.DARK)
     setThemeColor("#4C8DFF")
+    # 细灰分割线：左右面板与中间画布之间的间隔保持 1px、低对比度
+    app.setStyleSheet(
+        "QSplitter::handle { background: rgba(255, 255, 255, 0.08); }"
+        "QSplitter::handle:horizontal { width: 1px; }"
+        "QSplitter::handle:vertical { height: 1px; }"
+        "QSplitter::handle:hover { background: rgba(255, 255, 255, 0.14); }"
+    )
 
     from aimatting.ui.main_window import MainWindow
 

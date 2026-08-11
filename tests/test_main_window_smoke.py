@@ -260,6 +260,29 @@ def test_crop_after_matte_preserves_alpha() -> None:
         win.close()
 
 
+def test_crop_can_be_undone_before_matte() -> None:
+    from aimatting.ui.main_window import MainWindow
+
+    win = MainWindow()
+    try:
+        img = Image.new("RGB", (100, 80), (10, 200, 10))
+        win.current_path = "t.png"
+        win.original_image = img
+        win.prep_source = img
+        win._exit_all_tools()
+        win._reset_working()
+
+        win._apply_crop((10, 10, 60, 50))
+        assert win.working_rgb.size == (50, 40)
+        assert win.history.can_undo()
+
+        win.undo()
+        assert win.working_rgb.size == (100, 80)
+        assert win.original_image.size == (100, 80)
+    finally:
+        win.close()
+
+
 def test_entering_tool_disables_compare() -> None:
     from aimatting.ui.main_window import MainWindow
 
