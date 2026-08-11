@@ -13,6 +13,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
+    QDialog,
     QFileDialog,
     QGraphicsOpacityEffect,
     QGridLayout,
@@ -26,7 +27,6 @@ from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
     CheckBox,
-    ColorDialog,
     ComboBox,
     FluentIcon,
     LineEdit,
@@ -455,6 +455,10 @@ class ToolPanel(QWidget):
         self.color_preview = PushButton("自定义颜色")
         self.color_preview.setFixedSize(90, 30)
         custom_row.addWidget(self.color_preview)
+        self.pipette_button = PushButton("吸管")
+        self.pipette_button.setFixedWidth(56)
+        self.pipette_button.setToolTip("从屏幕任意位置取色")
+        custom_row.addWidget(self.pipette_button)
         self.hex_edit = LineEdit()
         self.hex_edit.setMaxLength(9)
         self.hex_edit.setPlaceholderText("#RRGGBB")
@@ -536,6 +540,7 @@ class ToolPanel(QWidget):
         self.bg_enabled.toggled.connect(lambda _: self.bg_changed.emit())
         self.opacity_slider.valueChanged.connect(lambda _: self.bg_changed.emit())
         self.color_preview.clicked.connect(self.pick_custom_color)
+        self.pipette_button.clicked.connect(self.pick_screen_color)
         self.hex_edit.editingFinished.connect(self._apply_hex)
         for spin in self.rgb_spins.values():
             spin.valueChanged.connect(self._rgb_to_hex)
@@ -652,9 +657,18 @@ class ToolPanel(QWidget):
         self.bg_changed.emit()
 
     def pick_custom_color(self) -> None:
-        dialog = ColorDialog(QColor(self._current_hex), "选择自定义背景色", self)
-        dialog.colorChanged.connect(self._set_color)
-        dialog.exec()
+        from aimatting.ui.color_tools import run_color_dialog
+
+        run_color_dialog(
+            self, QColor(self._current_hex), "选择自定义背景色", self._set_color
+        )
+
+    def pick_screen_color(self) -> None:
+        from aimatting.ui.eyedropper import Eyedropper
+
+        picker = Eyedropper(self)
+        if picker.exec() == QDialog.DialogCode.Accepted:
+            self._set_color(picker.color())
 
     def get_bg_state(self) -> tuple[bool, str, int]:
         return (

@@ -19,7 +19,6 @@ from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
     CheckBox,
-    ColorDialog,
     ComboBox,
     FluentStyleSheet,
     LineEdit,
@@ -226,7 +225,7 @@ class AboutDialog(QDialog):
         self.setMinimumWidth(420)
         FluentStyleSheet.DIALOG.apply(self)
         layout = QVBoxLayout(self)
-        title = TitleLabel("AIMatting v0.0.3")
+        title = TitleLabel("AIMatting v0.0.4")
         layout.addWidget(title)
         text = BodyLabel(
             "基于 BiRefNet（MIT License）高精度抠图算法，"
@@ -323,6 +322,10 @@ class BatchItemSettingsDialog(QDialog):
         self.color_button = PushButton("背景颜色")
         self.color_button.setFixedWidth(100)
         color_row.addWidget(self.color_button)
+        self.pipette_button = PushButton("吸管")
+        self.pipette_button.setFixedWidth(56)
+        self.pipette_button.setToolTip("从屏幕任意位置取色")
+        color_row.addWidget(self.pipette_button)
         self.hex_label = CaptionLabel(self._hex())
         color_row.addWidget(self.hex_label)
         color_row.addStretch(1)
@@ -380,6 +383,7 @@ class BatchItemSettingsDialog(QDialog):
         layout.addLayout(btn_row)
 
         self.color_button.clicked.connect(self._pick_color)
+        self.pipette_button.clicked.connect(self._pick_screen_color)
         self._refresh_color()
 
     def _hex(self) -> str:
@@ -393,14 +397,22 @@ class BatchItemSettingsDialog(QDialog):
         self.hex_label.setText(self._hex())
 
     def _pick_color(self) -> None:
-        dialog = ColorDialog(QColor(*self._color), "选择背景色", self)
+        from aimatting.ui.color_tools import run_color_dialog
 
         def apply_color(color: QColor) -> None:
             self._color = color.getRgb()[:3]
             self._refresh_color()
 
-        dialog.colorChanged.connect(apply_color)
-        dialog.exec()
+        run_color_dialog(self, QColor(*self._color), "选择背景色", apply_color)
+
+    def _pick_screen_color(self) -> None:
+        from aimatting.ui.eyedropper import Eyedropper
+
+        picker = Eyedropper(self)
+        if picker.exec() == QDialog.DialogCode.Accepted:
+            color = picker.color().getRgb()[:3]
+            self._color = tuple(color)
+            self._refresh_color()
 
     def values(self) -> dict:
         return {

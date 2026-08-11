@@ -123,12 +123,13 @@ class BatchPanel(QWidget):
         self.add_button.clicked.connect(self._add_files)
         self.remove_button.clicked.connect(self._remove_selected)
         self.clear_button.clicked.connect(self.file_list.clear)
-        self.file_list.itemSelectionChanged.connect(self._update_edit_button)
+        self.file_list.itemSelectionChanged.connect(self._update_selection_ui)
         self.edit_button.clicked.connect(self._emit_edit)
         self.start_button.clicked.connect(self._emit_start)
         self.stop_button.clicked.connect(self.stop_requested.emit)
         self.item_settings_button.clicked.connect(self._open_item_settings)
         self.retry_button.clicked.connect(self.retry_requested.emit)
+        self._update_selection_ui()
 
     def _add_files(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(
@@ -170,8 +171,11 @@ class BatchPanel(QWidget):
         for item in self.file_list.selectedItems():
             self.file_list.takeItem(self.file_list.row(item))
 
-    def _update_edit_button(self) -> None:
-        self.edit_button.setEnabled(len(self.file_list.selectedItems()) == 1)
+    def _update_selection_ui(self) -> None:
+        """选中单张显示「单独设置」，选中多张显示「批量设置」。"""
+        count = len(self.file_list.selectedItems())
+        self.edit_button.setEnabled(count == 1)
+        self.item_settings_button.setText("批量设置" if count > 1 else "单独设置")
 
     def _emit_edit(self) -> None:
         items = self.file_list.selectedItems()
@@ -186,7 +190,7 @@ class BatchPanel(QWidget):
             self.file_list.row(item) for item in self.file_list.selectedItems()
         ]
         if not rows:
-            box = MessageBox("提示", "请先选中要单独设置的图片。", self)
+            box = MessageBox("提示", "请先选中要设置参数的图片。", self)
             box.yesButton.setText("知道了")
             box.exec()
             return
